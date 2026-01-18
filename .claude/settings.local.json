@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "WebSearch",
+      "Bash(uv sync:*)",
+      "Bash(python -c:*)",
+      "Bash(.venvScriptspython.exe -c \"from src.types import Chunk, QueryResult; print\\(''All modules imported successfully''\\)\")",
+      "Bash(\".venv/Scripts/python.exe\" -c \"from src.types import Chunk, QueryResult; print\\(''All modules imported successfully''\\)\")",
+      "Bash(\".venv/Scripts/python.exe\" -m cli.cli --help)",
+      "Bash(uv run:*)",
+      "Bash(uv pip install:*)",
+      "Bash(python:*)",
+      "Bash(uv pip compile:*)",
+      "Bash(uv pip download:*)",
+      "Bash(ls:*)",
+      "Bash(powershell:*)",
+      "Bash(wc:*)",
+      "Bash(python3:*)",
+      "Bash(git -C /c/Users/arif/PycharmProjects/docling-rag log --oneline -10)",
+      "Bash(find:*)",
+      "Bash(test:*)",
+      "Bash(move \"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\src\\\\processing\\\\loader.py\" \"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\src\\\\ingestion\\\\loader.py\")",
+      "Bash(for dir in src/*/)",
+      "Bash(do if [ -d \"$dir\" ])",
+      "Bash(rag --help:*)",
+      "Bash(rag query-cmd:*)",
+      "Bash(.venvScriptspython.exe -m cli.cli query-cmd \"What is safety ?\")",
+      "Bash(\".venv/Scripts/python.exe\" -m cli.cli query-cmd \"What is safety ?\")"
+    ]
+  }
+}
