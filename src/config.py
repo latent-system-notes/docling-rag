@@ -84,8 +84,7 @@ def enforce_logging_format():
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"  # Disable MPS (Apple Silicon GPU)
 
-# Force Docling to use RapidOCR only (prevent OCRMac/EasyOCR attempts)
-os.environ["DOCLING_OCR_ENGINE"] = "rapidocr"
+# OCR engine is configured via settings.ocr_engine (defaults to "auto")
 
 # Import torch after setting environment variables
 try:
@@ -126,6 +125,7 @@ class Settings(BaseSettings):
     enable_ocr: bool = True
     enable_asr: bool = True
     ocr_languages: str = "eng+ara"
+    ocr_engine: str = "auto"  # auto, rapidocr, easyocr, tesseract, ocrmac
 
     default_top_k: int = 5
 
