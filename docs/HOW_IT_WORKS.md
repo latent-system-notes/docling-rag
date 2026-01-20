@@ -7,7 +7,7 @@
 Think of it as giving an AI a smart filing cabinet:
 1. **Store**: Put your documents in the cabinet (with a clever indexing system)
 2. **Search**: When you ask a question, find the most relevant documents
-3. **Answer**: Feed those documents to an AI to write an answer
+3. **Provide Context**: Return those documents to an external AI (like Claude) to write an answer
 
 ## The Problem RAG Solves
 
@@ -108,11 +108,11 @@ rag stats  # Works!
 
 ### Part 2: Querying (Every Time You Ask)
 
-**What**: Ask a question and get an answer
+**What**: Ask a question and retrieve relevant context
 **Where**: `src/query.py` orchestrates everything
 
 ```
-Your Question → [Embed] → [Search] → [Generate Answer] → Response
+Your Question → [Embed] → [Search] → Return Context
 ```
 
 **Steps:**
@@ -125,10 +125,10 @@ Your Question → [Embed] → [Search] → [Generate Answer] → Response
    - Uses cosine similarity (measures angle between vectors)
    - Returns top 5 most relevant chunks
 
-3. **Generate Answer** (`generation/granite.py`)
-   - Feeds your question + relevant chunks to Granite LLM
+3. **Return Context**
+   - Returns the relevant chunks to the user
+   - User can feed these to external LLM (like Claude) for answer generation
    - LLM reads the context and writes an answer
-   - Like asking a smart assistant who just read the relevant pages
 
 ## Key Concepts for Beginners
 
@@ -185,7 +185,7 @@ Query: "How to make espresso?"
 
 ## Code Flow (Follow Along)
 
-### When you run: `rag ingest paper.pdf`
+### When you run: `rag sync paper.pdf`
 
 1. `cli/cli.py` → Calls `ingest_document()`
 2. `ingestion/document.py:load_document()` → Parses PDF
@@ -193,15 +193,14 @@ Query: "How to make espresso?"
 4. `utils.py:embed_batch()` → Converts chunks to vectors
 5. `storage/chroma_client.py:add_vectors()` → Saves to database
 
-### When you run: `rag query-cmd "What is machine learning?"`
+### When you run: `rag query "What is machine learning?"`
 
 1. `cli/cli.py` → Calls `query()`
 2. `query.py:query()` → Orchestrates everything:
    - `retrieval/search.py:search()` → Find relevant chunks
    - `utils.py:embed()` → Convert query to vector
    - `storage/chroma_client.py:search_vectors()` → Search database
-   - `generation/granite.py:generate_answer()` → Create answer
-3. Returns: Answer + Context
+3. Returns: Relevant context chunks for external LLM reasoning
 
 ## File Structure (Simplified)
 
@@ -220,45 +219,19 @@ src/
 ├── storage/         → ChromaDB vector database
 │   └── chroma_client.py → Client factory (HTTP/persistent modes) + save/search vectors
 │
-├── retrieval/       → Find relevant chunks
-│   └── search.py    → Vector similarity search
-│
-└── generation/      → Generate answers with LLM
-    └── granite.py   → Granite model integration
+└── retrieval/       → Find relevant chunks
+    └── search.py    → Vector similarity search
 ```
 
-## Three Answer Modes Explained
-
-### 1. `context_only` Mode
-```python
-query("What is AI?", mode="context_only")
-# Returns: Just the relevant chunks
-# Use when: You want to use Claude or another LLM to reason
-```
-
-### 2. `granite` Mode
-```python
-query("What is AI?", mode="granite")
-# Returns: Just Granite's answer (hides the chunks)
-# Use when: You want a direct answer, no context needed
-```
-
-### 3. `both` Mode
-```python
-query("What is AI?", mode="both")
-# Returns: Chunks AND Granite's answer
-# Use when: You want to verify the answer against sources
-```
-
-## Smart Folder Ingestion
+## Smart Syncing
 
 ### What It Does
 
-The system can automatically ingest entire folders of documents, intelligently filtering and processing only supported file types while skipping duplicates.
+The system can automatically sync files and folders, intelligently filtering and processing only supported file types while detecting changes.
 
 ### How It Works
 
-**Example**: `rag ingest ./documents`
+**Example**: `rag sync ./documents`
 
 ```
 ./documents/
@@ -275,14 +248,14 @@ The system can automatically ingest entire folders of documents, intelligently f
 
 ### File Filtering Process
 
-When you run `rag ingest ./folder`, the system:
+When you run `rag sync ./folder`, the system:
 
 1. **Scans the directory** recursively (or use `--no-recursive` for flat scan)
 2. **Filters by extension** - Only processes supported file types
 3. **Excludes patterns** - Skips hidden files, temp files, backups
-4. **Checks for duplicates** - Skips files already in database (unless `--force`)
-5. **Ingests files** - Processes each file with detailed progress
-6. **Shows summary** - Reports success/failure/skipped counts
+4. **Detects changes** - Finds new, modified, and deleted files
+5. **Syncs files** - Adds new, updates modified, removes deleted
+6. **Shows summary** - Reports added/updated/removed counts
 
 ### Supported File Types
 
@@ -304,63 +277,80 @@ These patterns are always excluded:
 - Backups: `*.bak`, `*.backup`
 - System files: `Thumbs.db`, `.DS_Store`
 
-### Duplicate Detection
+### Change Detection
 
 **How it works:**
 1. Each file path is converted to an MD5 hash (document ID)
-2. Before ingestion, the system checks if that ID exists in ChromaDB
-3. If found, the file is skipped (unless you use `--force`)
+2. The system checks ChromaDB for existing documents
+3. Compares file modification timestamps to detect changes
+4. Identifies files in DB but not on disk (deleted)
 
 **Example:**
 ```bash
-# First run: Ingests 10 files
-rag ingest ./documents
-# Ingested 10 files
+# First sync: Adds 10 files
+rag sync ./documents
+# Added: 10 files
 
-# Second run: Skips all 10 files (already in DB)
-rag ingest ./documents
-# Skipping 10 already-ingested files
+# Second sync: Everything up to date
+rag sync ./documents
+# ✓ Everything is up to date!
 
-# Force re-ingestion
-rag ingest ./documents --force
-# Re-ingested 10 files
+# After editing a file and deleting another
+rag sync ./documents
+# Updated: 1 file (modified)
+# Removed: 1 file (deleted from disk)
+
+# Force re-sync (re-ingest all)
+rag sync ./documents --force
+# Updated: 10 files
 ```
 
 ### Usage Examples
 
-**Basic folder ingestion** (recursive):
+**Basic folder sync** (recursive):
 ```bash
-rag ingest ./documents
+rag sync ./documents
 ```
 
 **Output:**
 ```
-Scanning ./documents...
-Found 8 files to ingest
+Analyzing ./documents...
 
-  ✓ report.pdf (12 chunks)
-  ✓ slides.pptx (8 chunks)
-  ✓ data.xlsx (5 chunks)
-  ...
+Sync Analysis:
+  New files: 5
+  Modified files: 2
+  Deleted files: 1
+
+Syncing...
+  ✓ Added report.pdf (12 chunks)
+  ✓ Added slides.pptx (8 chunks)
+  ↻ Updated data.xlsx (5 chunks)
+  ✗ Removed old-file.pdf (10 chunks)
 
 Summary:
-  ✓ Ingested: 8 files
-  → Already in DB: 2 files
+  Added: 5 files
+  Updated: 2 files
+  Removed: 1 file
+```
+
+**Preview changes** (dry run):
+```bash
+rag sync ./documents --dry-run
 ```
 
 **Non-recursive** (only current folder):
 ```bash
-rag ingest ./documents --no-recursive
+rag sync ./documents --no-recursive
 ```
 
-**Force re-ingestion** (ignore duplicates):
+**Force re-sync** (re-ingest all):
 ```bash
-rag ingest ./documents --force
+rag sync ./documents --force
 ```
 
-**Single file** (works as before):
+**Single file**:
 ```bash
-rag ingest paper.pdf
+rag sync paper.pdf
 ```
 
 ### Technical Details
@@ -405,14 +395,14 @@ rag ingest paper.pdf
 
 **A**: Simple! Run:
 ```bash
-rag ingest /path/to/document.pdf
+rag sync /path/to/document.pdf
 ```
 
 The system handles everything else automatically.
 
-### Q: Can I use my own LLM instead of Granite?
+### Q: Can I use my own LLM?
 
-**A**: Yes! Use `mode="context_only"` to get just the chunks, then feed them to Claude, GPT, or any LLM you like.
+**A**: Yes! The system returns relevant context chunks that you can feed to Claude, GPT, or any LLM you prefer for answer generation.
 
 ### Q: What's the difference between persistent and HTTP mode for ChromaDB?
 
@@ -447,9 +437,9 @@ The server reads your existing SQLite database. Zero data migration needed!
 
 ## Next Steps
 
-1. **Try it**: Run `rag ingest` and `rag query-cmd`
-2. **Read the code**: Start with `src/query.py` (it's well-commented now!)
-3. **Experiment**: Try different answer modes
+1. **Try it**: Run `rag sync` and `rag query`
+2. **Read the code**: Start with `src/query.py` (it's well-commented!)
+3. **Experiment**: Try different top_k values for more or fewer context chunks
 4. **Customize**: Edit `src/config.py` to change behavior
 
 ## Resources

@@ -31,7 +31,13 @@
       "Bash(git remote:*)",
       "Bash(git push:*)",
       "Bash(gh auth:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:docling-project.github.io)",
+      "Bash(pip show:*)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(pip install:*)"
     ]
   }
 }

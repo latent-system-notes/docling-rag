@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 from langdetect import LangDetectException, detect
-from rich.progress import Progress
 
 from .config import settings, get_logger
 from .models import EmbeddingError
@@ -88,30 +87,17 @@ def embed(texts: str | list[str], show_progress: bool = False) -> np.ndarray:
         embedder = get_embedder()
 
         # Generate embeddings with optional progress bar
-        if show_progress and len(texts) > 1:
-            embeddings = embedder.encode(
-                texts,
-                batch_size=settings.embedding_batch_size,
-                show_progress_bar=True,
-                convert_to_numpy=True,
-            )
-        else:
-            embeddings = embedder.encode(
-                texts,
-                batch_size=settings.embedding_batch_size,
-                show_progress_bar=False,
-                convert_to_numpy=True,
-            )
+        embeddings = embedder.encode(
+            texts,
+            batch_size=settings.embedding_batch_size,
+            show_progress_bar=show_progress,
+            convert_to_numpy=True,
+        )
 
         return embeddings
 
     except Exception as e:
         raise EmbeddingError(f"Failed to generate embeddings: {e}") from e
-
-
-def embed_batch(texts: list[str], desc: str = "Embedding") -> np.ndarray:
-    """Embed multiple texts with progress bar (convenience wrapper)."""
-    return embed(texts, show_progress=True)
 
 
 # ============================================================================
@@ -120,22 +106,9 @@ def embed_batch(texts: list[str], desc: str = "Embedding") -> np.ndarray:
 
 
 def get_model_paths() -> dict[str, Path]:
-    """Return local paths for all models based on settings.
-
-    Models are stored as: ./models/{type}/{model-name}/
-    We extract the model name from HuggingFace IDs like "org/model-name"
-    """
-    base = settings.models_dir
-
-    # Extract model names from "organization/model-name" format
+    """Return local path for embedding model."""
     embedding_name = settings.embedding_model.split("/")[-1]
-    granite_name = settings.granite_model_id.split("/")[-1]
-
-    return {
-        "embedding": base / "embedding" / embedding_name,
-        "granite_tokenizer": base / "granite" / granite_name / "tokenizer",
-        "granite_model": base / "granite" / granite_name / "model",
-    }
+    return {"embedding": settings.models_dir / "embedding" / embedding_name}
 
 
 def download_embedding_model() -> None:
@@ -151,50 +124,9 @@ def download_embedding_model() -> None:
     logger.info(f"Downloaded embedding model to {path}")
 
 
-def download_granite_model() -> None:
-    """Download Granite model and tokenizer to local directory"""
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    tok_path = get_model_paths()["granite_tokenizer"]
-    model_path = get_model_paths()["granite_model"]
-
-    tok_path.mkdir(parents=True, exist_ok=True)
-    model_path.mkdir(parents=True, exist_ok=True)
-
-    logger.info(f"Downloading Granite tokenizer: {settings.granite_model_id}")
-    tokenizer = AutoTokenizer.from_pretrained(settings.granite_model_id)
-    tokenizer.save_pretrained(str(tok_path))
-    logger.info(f"Downloaded Granite tokenizer to {tok_path}")
-
-    logger.info(f"Downloading Granite model: {settings.granite_model_id}")
-    model = AutoModelForCausalLM.from_pretrained(settings.granite_model_id)
-    model.save_pretrained(str(model_path))
-    logger.info(f"Downloaded Granite model to {model_path}")
-
-
-def download_all_models() -> None:
-    """Download all models with progress tracking"""
-    with Progress() as progress:
-        task = progress.add_task("Downloading models", total=2)
-
-        progress.update(task, description="Downloading embedding model...")
-        download_embedding_model()
-        progress.advance(task)
-
-        progress.update(task, description="Downloading Granite model...")
-        download_granite_model()
-        progress.advance(task)
-
-    logger.info("All models downloaded successfully")
-
-
 def verify_models_exist() -> dict[str, bool]:
-    """Check if all models exist locally"""
-    paths = get_model_paths()
-    return {
-        "embedding": paths["embedding"].exists(),
-        "granite": paths["granite_model"].exists(),
-    }
+    """Check if embedding model exists locally"""
+    return {"embedding": get_model_paths()["embedding"].exists()}
 
 
 # ============================================================================

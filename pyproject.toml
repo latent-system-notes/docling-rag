@@ -6,18 +6,15 @@ build-backend = "hatchling.build"
 packages = ["src", "cli", "config"]
 
 [project]
-name = "dockling-rag"
+name = "docling-rag"
 version = "0.1.0"
-description = "Production-ready RAG system with Docling, ChromaDB, and IBM Granite"
+description = "Production-ready RAG system with Docling and ChromaDB"
 requires-python = ">=3.11"
 dependencies = [
     "docling>=2.68.0",
     "chromadb>=0.4.0",
     "sentence-transformers>=2.5",
     "torch>=2.2",
-    "transformers>=4.40",
-    "accelerate>=0.26",
-    "bitsandbytes>=0.41",
     "langdetect>=1.0.9",
     "fastmcp>=0.4",
     "typer>=0.12",
@@ -26,6 +23,7 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
+    "rank-bm25>=0.2.2",
 ]
 
 [project.optional-dependencies]

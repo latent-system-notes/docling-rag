@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from ..config import settings, get_logger
-from ..utils import embed_batch
+from ..utils import embed
 from ..models import IngestionError, DocumentMetadata
 from .chunker import chunk_document
 from .document import extract_metadata, load_document
@@ -10,19 +10,29 @@ from ..storage.chroma_client import add_vectors
 logger = get_logger(__name__)
 
 
-def ingest_document(
-    file_path: str | Path,
-    doc_type: str = "",
-) -> DocumentMetadata:
+def ingest_document(file_path: str | Path) -> DocumentMetadata:
+    """Ingest a document into the RAG system.
+
+    Args:
+        file_path: Path to the document file
+
+    Returns:
+        DocumentMetadata with ingestion details
+
+    Raises:
+        IngestionError: If ingestion fails
+    """
     try:
         file_path = Path(file_path)
 
         if not file_path.exists():
             raise IngestionError(f"File not found: {file_path}")
 
-        logger.info(f"Ingesting document: {file_path}")
+        logger.info(f"Loading document: {file_path}")
 
         doc = load_document(file_path)
+
+        logger.info(f"Chunking document...")
         chunks = chunk_document(doc, doc_id=str(file_path))
 
         if not chunks:
@@ -31,13 +41,14 @@ def ingest_document(
         metadata = extract_metadata(doc, file_path, len(chunks))
 
         chunk_texts = [chunk.text for chunk in chunks]
-        embeddings = embed_batch(chunk_texts, desc=f"Embedding {file_path.name}")
+        logger.info(f"Generating embeddings for {len(chunks)} chunks...")
+        embeddings = embed(chunk_texts, show_progress=True)
 
         chunk_ids = [chunk.id for chunk in chunks]
         chunk_metadata = [
             {
                 "text": chunk.text,
-                "doc_id": chunk.doc_id,
+                "doc_id": metadata.doc_id,  # Use the MD5 hash from metadata, not chunk.doc_id
                 "page_num": chunk.page_num,
                 "doc_type": metadata.doc_type,
                 "language": metadata.language,
@@ -55,16 +66,3 @@ def ingest_document(
 
     except Exception as e:
         raise IngestionError(f"Failed to ingest {file_path}: {e}") from e
-
-
-def ingest_batch(file_paths: list[Path]) -> list[DocumentMetadata]:
-    results = []
-
-    for file_path in file_paths:
-        try:
-            metadata = ingest_document(file_path)
-            results.append(metadata)
-        except Exception as e:
-            logger.error(f"Failed to ingest {file_path}: {e}")
-
-    return results

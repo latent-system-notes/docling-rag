@@ -9,10 +9,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO
 
+from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import DoclingDocument
 
-from ..config import settings, get_logger
+from ..config import settings, get_logger, enforce_logging_format
 from ..models import DocumentLoadError, DocumentMetadata
 from ..utils import detect_language
 
@@ -48,13 +51,32 @@ def load_document(
         DocumentLoadError: If document cannot be loaded
     """
     try:
-        # Configure document converter with OCR settings
+        # Enforce our logging format on RapidOCR (it adds its own handlers)
+        enforce_logging_format()
+
+        # Force CPU-only processing (no GPU usage)
+        accelerator_options = AcceleratorOptions(
+            num_threads=4,  # Use multiple CPU threads for performance
+            device=AcceleratorDevice.CPU  # Explicitly force CPU device
+        )
+
+        # Configure RapidOCR options with Arabic and English support
+        ocr_options = RapidOcrOptions(
+            lang=['english', 'arabic'],  # Support both English and Arabic
+        )
+
+        # Configure PDF pipeline options with CPU-only accelerator and RapidOCR
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.accelerator_options = accelerator_options
+        pipeline_options.ocr_options = ocr_options
+        pipeline_options.do_ocr = settings.enable_ocr
+
+        # Configure document converter with OCR settings and CPU-only mode
         converter = DocumentConverter(
             allowed_formats=None,  # Accept all formats
             format_options={
-                "pdf": PdfFormatOption(
-                    do_ocr=settings.enable_ocr,  # Enable OCR for scanned PDFs
-                    ocr_lang=settings.ocr_languages.split("+"),  # Languages: eng, ara, etc.
+                InputFormat.PDF: PdfFormatOption(
+                    pipeline_options=pipeline_options,
                 ),
             },
         )
@@ -65,16 +87,6 @@ def load_document(
 
     except Exception as e:
         raise DocumentLoadError(f"Failed to load document: {e}") from e
-
-
-def convert_to_markdown(doc: DoclingDocument) -> str:
-    """Convert document to Markdown format (useful for debugging/preview)."""
-    return doc.export_to_markdown()
-
-
-def convert_to_dict(doc: DoclingDocument) -> dict:
-    """Convert document to dictionary (useful for JSON export)."""
-    return doc.export_to_dict()
 
 
 # ============================================================================
@@ -133,35 +145,3 @@ def extract_metadata(
         num_chunks=num_chunks,
         ingested_at=datetime.now(),
     )
-
-
-def get_file_format(file_path: Path) -> str:
-    """Get normalized file format from extension.
-
-    Args:
-        file_path: Path to the file
-
-    Returns:
-        Normalized format string (pdf, docx, image, audio, etc.)
-    """
-    suffix = file_path.suffix.lstrip(".").lower()
-
-    # Map file extensions to standard formats
-    format_map = {
-        "pdf": "pdf",
-        "docx": "docx",
-        "pptx": "pptx",
-        "xlsx": "xlsx",
-        "html": "html",
-        "htm": "html",
-        "md": "md",
-        "png": "image",
-        "jpg": "image",
-        "jpeg": "image",
-        "tiff": "image",
-        "tif": "image",
-        "wav": "audio",
-        "mp3": "audio",
-    }
-
-    return format_map.get(suffix, "unknown")

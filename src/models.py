@@ -8,9 +8,7 @@ from pydantic import BaseModel, Field
 # Type Aliases
 # ============================================================================
 
-AnswerMode = Literal["granite", "context_only", "both"]
 ChunkingMethod = Literal["hybrid", "hierarchical"]
-Quantization = Literal["none", "4bit", "8bit"]
 Device = Literal["cpu", "cuda", "mps"]
 
 
@@ -45,8 +43,6 @@ class SearchResult(BaseModel):
 class QueryResult(BaseModel):
     query: str
     context: list[SearchResult]
-    answer: str | None = None
-    mode: AnswerMode
 
 
 # ============================================================================
@@ -54,41 +50,31 @@ class QueryResult(BaseModel):
 # ============================================================================
 
 
-class DocklingRagError(Exception):
+class DoclingRagError(Exception):
     """Base exception for all RAG errors"""
     pass
 
 
-class DocumentLoadError(DocklingRagError):
+class DocumentLoadError(DoclingRagError):
     """Failed to load document"""
     pass
 
 
-class ChunkingError(DocklingRagError):
+class ChunkingError(DoclingRagError):
     """Failed to chunk document"""
     pass
 
 
-class EmbeddingError(DocklingRagError):
+class EmbeddingError(DoclingRagError):
     """Failed to generate embeddings"""
     pass
 
 
-class StorageError(DocklingRagError):
+class StorageError(DoclingRagError):
     """Failed storage operation"""
     pass
 
 
-class SearchError(DocklingRagError):
-    """Failed search operation"""
-    pass
-
-
-class GenerationError(DocklingRagError):
-    """Failed to generate answer"""
-    pass
-
-
-class IngestionError(DocklingRagError):
+class IngestionError(DoclingRagError):
     """Failed to ingest document"""
     pass

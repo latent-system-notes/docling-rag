@@ -1,15 +1,12 @@
 {
   "mcpServers": {
-    "dockling-rag": {
+    "docling-rag": {
       "command": "python",
       "args": [
         "-m",
         "src.mcp.server"
       ],
-      "cwd": "C:\\Users\\arif\\PycharmProjects\\dockling-rag",
-      "env": {
-        "RAG_ANSWER_MODE": "both"
-      }
+      "cwd": "C:\\Users\\arif\\PycharmProjects\\docling-rag"
     }
   }
 }

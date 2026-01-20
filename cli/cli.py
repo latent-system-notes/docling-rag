@@ -6,117 +6,13 @@ from rich.table import Table
 from rich import box
 
 from src.config import settings, get_logger
-from src.storage.chroma_client import get_stats, initialize_collections, reset_collection, document_exists, list_documents, remove_document
+from src.storage.chroma_client import get_stats, initialize_collections, reset_collection, document_exists, list_documents, remove_document, remove_document_by_id
 from src.utils import discover_files, is_file_modified
-from src.models import AnswerMode
 
 logger = get_logger(__name__)
 
 app = typer.Typer()
 console = Console()
-
-
-@app.command()
-def ingest(
-    path: str,
-    force: bool = typer.Option(False, "--force", "-f", help="Re-ingest even if already exists"),
-    recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Scan subdirectories"),
-):
-    """Ingest document(s) into the RAG system.
-
-    Automatically detects whether the path is a file or directory.
-    For directories, only supported file types are ingested (PDF, DOCX, etc.).
-    Files already in the database are skipped unless --force is used.
-
-    Examples:
-        rag ingest paper.pdf                    # Single file
-        rag ingest ./documents                  # Folder (auto-detected)
-        rag ingest ./docs --no-recursive        # Folder, no subdirs
-        rag ingest ./docs --force               # Re-ingest everything
-    """
-    from src.ingestion.pipeline import ingest_document
-    from src.ingestion.progress import IngestionProgress
-
-    file_path = Path(path)
-
-    # Initialize collections
-    initialize_collections()
-
-    # Auto-detect folder vs file
-    if file_path.is_dir():
-        # Folder ingestion
-        console.print(f"[cyan]Scanning {file_path}...")
-
-        # Discover files with filtering
-        all_files = discover_files(file_path, recursive=recursive)
-
-        if not all_files:
-            console.print(f"[yellow]No supported files found in {file_path}")
-            return
-
-        # Filter out already-ingested files (unless --force)
-        if not force:
-            new_files = []
-            skipped = []
-            for f in all_files:
-                if document_exists(f):
-                    skipped.append(f)
-                else:
-                    new_files.append(f)
-
-            if skipped:
-                console.print(f"[yellow]Skipping {len(skipped)} already-ingested files (use --force to re-ingest)")
-
-            files_to_ingest = new_files
-        else:
-            files_to_ingest = all_files
-
-        if not files_to_ingest:
-            console.print(f"[green]All files already ingested. Use --force to re-ingest.")
-            return
-
-        console.print(f"[green]Found {len(files_to_ingest)} files to ingest\n")
-
-        # Process with detailed progress
-        results = []
-        failed = []
-        with IngestionProgress(len(files_to_ingest)) as progress:
-            for file in files_to_ingest:
-                try:
-                    metadata = ingest_document(file)
-                    results.append(metadata)
-                    progress.update(file, len(results))
-                    console.print(f"  [green]✓[/green] {file.name} ({metadata.num_chunks} chunks)")
-                except Exception as e:
-                    failed.append(file)
-                    logger.error(f"Failed to ingest {file}: {e}")
-                    console.print(f"  [red]✗[/red] {file.name} - {str(e)}")
-
-        # Summary
-        console.print(f"\n[bold]Summary:[/bold]")
-        console.print(f"  [green]✓ Ingested:[/green] {len(results)} files")
-        if failed:
-            console.print(f"  [red]✗ Failed:[/red] {len(failed)} files")
-        if not force and skipped:
-            console.print(f"  [yellow]→ Already in DB:[/yellow] {len(skipped)} files")
-
-    elif file_path.is_file():
-        # Single file ingestion
-        if not force and document_exists(file_path):
-            console.print(f"[yellow]Document already exists. Use --force to re-ingest.")
-            raise typer.Exit(0)
-
-        try:
-            metadata = ingest_document(file_path)
-            console.print(f"[green]✓ Ingested: {file_path.name} ({metadata.num_chunks} chunks)")
-        except Exception as e:
-            logger.error(f"Failed to ingest {file_path}: {e}")
-            console.print(f"[red]✗ Failed to ingest {file_path.name}: {str(e)}")
-            raise typer.Exit(1)
-
-    else:
-        console.print(f"[red]Error: {path} is not a file or directory")
-        raise typer.Exit(1)
 
 
 @app.command()
@@ -165,6 +61,7 @@ def list_docs(
         return
 
     table = Table(title=f"Indexed Documents ({len(documents)} total)", box=None, show_header=True)
+    table.add_column("ID", style="dim", width=6)
     table.add_column("File Name", style="cyan", no_wrap=True)
     table.add_column("Type", style="magenta", width=6)
     table.add_column("Lang", style="blue", width=6)
@@ -188,7 +85,11 @@ def list_docs(
             filename = Path(doc['file_path']).name
             file_display = truncate_filename(filename)
 
+        # Show last 6 digits of doc_id
+        doc_id_short = doc['doc_id'][-6:] if len(doc['doc_id']) >= 6 else doc['doc_id']
+
         table.add_row(
+            doc_id_short,
             file_display,
             doc['doc_type'],
             doc['language'],
@@ -205,86 +106,120 @@ def list_docs(
 
 @app.command()
 def remove(
-    path: str,
+    doc_id: str,
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ):
-    """Remove a document from the index.
+    """Remove a document from the index by its ID.
+
+    Use the last 6 digits shown in 'rag list-docs' or the full document ID.
 
     Examples:
-        rag remove paper.pdf
-        rag remove ./documents/report.pdf -y
+        rag remove b77745                # Remove by last 6 digits
+        rag remove cafe35ce5ec5228628e94420e75b7745 -y  # Remove by full ID
     """
-    file_path = Path(path)
-
     initialize_collections()
 
     # Confirm deletion unless --yes flag
     if not yes:
-        if not typer.confirm(f"Remove {file_path} from index?"):
+        if not typer.confirm(f"Remove document with ID ending in '{doc_id[-6:]}'?"):
             console.print("[yellow]Cancelled.")
             return
 
-    num_removed = remove_document(file_path)
+    try:
+        num_removed = remove_document_by_id(doc_id)
 
-    if num_removed > 0:
-        console.print(f"[green]✓ Removed {file_path} ({num_removed} chunks)")
-    else:
-        console.print(f"[yellow]Document not found: {file_path}")
+        if num_removed > 0:
+            console.print(f"[green]Removed document ({num_removed} chunks)")
+        else:
+            console.print(f"[yellow]Document not found with ID: {doc_id}")
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}")
+        raise typer.Exit(1)
 
 
 @app.command()
-def sync(
+def ingest(
     path: str,
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Scan subdirectories"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be updated without doing it"),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-ingest even if already exists"),
 ):
-    """Sync a folder by ingesting new/modified files and removing deleted ones.
+    """Ingest file(s) or folder by ingesting new/modified files and removing deleted ones.
 
-    Automatically detects:
+    For single files: Just ingests the file
+    For folders: Automatically detects changes and syncs
     - New files (not in index)
     - Modified files (changed since ingestion)
     - Deleted files (in index but not on disk)
 
     Examples:
-        rag sync ./documents              # Sync folder
-        rag sync ./docs --dry-run         # Preview changes
-        rag sync ./docs --no-recursive    # Sync without subdirs
+        rag ingest paper.pdf                # Ingest single file
+        rag ingest ./documents              # Ingest folder
+        rag ingest ./docs --dry-run         # Preview changes
+        rag ingest ./docs --no-recursive    # Ingest without subdirs
+        rag ingest ./docs --force           # Force re-ingest all
     """
     from src.ingestion.pipeline import ingest_document
 
-    folder_path = Path(path)
-
-    if not folder_path.is_dir():
-        console.print(f"[red]Error: {path} is not a directory")
-        raise typer.Exit(1)
+    file_path = Path(path)
 
     initialize_collections()
 
-    console.print(f"[cyan]Analyzing {folder_path}...")
+    # Handle single file
+    if file_path.is_file():
+        if not force and document_exists(file_path):
+            console.print(f"[yellow]Document already exists. Use --force to re-ingest.")
+            return
+
+        try:
+            metadata = ingest_document(file_path)
+            console.print(f"[green]✓ Ingested: {file_path.name} ({metadata.num_chunks} chunks)")
+        except Exception as e:
+            logger.error(f"Failed to ingest {file_path}: {e}")
+            console.print(f"[red]✗ Failed to ingest {file_path.name}: {str(e)}")
+            raise typer.Exit(1)
+        return
+
+    # Handle folder
+    if not file_path.is_dir():
+        console.print(f"[red]Error: {path} is not a file or directory")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]Analyzing {file_path}...")
 
     # Get all current documents from DB
     indexed_docs = list_documents()
     indexed_paths = {Path(doc['file_path']): doc for doc in indexed_docs}
 
     # Discover files on disk
-    disk_files = set(discover_files(folder_path, recursive=recursive))
+    disk_files = set(discover_files(file_path, recursive=recursive))
 
-    # Find new files (on disk but not in DB)
-    new_files = [f for f in disk_files if f not in indexed_paths]
+    if not disk_files:
+        console.print(f"[yellow]No supported files found in {file_path}")
+        return
 
-    # Find modified files (on disk, in DB, but modified)
-    modified_files = []
-    for f in disk_files:
-        if f in indexed_paths:
-            doc = indexed_paths[f]
-            if is_file_modified(f, doc['ingested_at']):
-                modified_files.append(f)
+    # If --force, treat all files as needing re-ingestion
+    if force:
+        new_files = []
+        modified_files = list(disk_files)  # Re-ingest everything
+        deleted_files = []
+    else:
+        # Find new files (on disk but not in DB)
+        new_files = [f for f in disk_files if f not in indexed_paths]
 
-    # Find deleted files (in DB but not on disk)
-    deleted_files = [p for p in indexed_paths.keys() if p not in disk_files]
+        # Find modified files (on disk, in DB, but modified)
+        modified_files = []
+        for f in disk_files:
+            if f in indexed_paths:
+                doc = indexed_paths[f]
+                if is_file_modified(f, doc['ingested_at']):
+                    modified_files.append(f)
+
+        # Find deleted files (in DB but not on disk)
+        deleted_files = [p for p in indexed_paths.keys() if p not in disk_files]
 
     # Summary
-    console.print(f"\n[bold]Sync Analysis:[/bold]")
+    console.print(f"\n[bold]Ingestion Analysis:[/bold]")
     console.print(f"  [green]New files:[/green] {len(new_files)}")
     console.print(f"  [yellow]Modified files:[/yellow] {len(modified_files)}")
     console.print(f"  [red]Deleted files:[/red] {len(deleted_files)}")
@@ -313,16 +248,23 @@ def sync(
 
         return
 
-    # Execute sync
-    console.print("\n[cyan]Syncing...")
+    # Execute ingestion
+    console.print("\n[cyan]Ingesting...")
+
+    total_files = len(deleted_files) + len(modified_files) + len(new_files)
+    current = 0
 
     # 1. Remove deleted files
     for file_path in deleted_files:
+        current += 1
+        console.print(f"  [{current}/{total_files}] Removing {file_path.name}...")
         num_removed = remove_document(file_path)
         console.print(f"  [red]✗[/red] Removed {file_path.name} ({num_removed} chunks)")
 
     # 2. Re-ingest modified files (remove old version first)
     for file_path in modified_files:
+        current += 1
+        console.print(f"  [{current}/{total_files}] Updating {file_path.name}...")
         remove_document(file_path)  # Remove old version
         try:
             metadata = ingest_document(file_path)
@@ -333,6 +275,8 @@ def sync(
 
     # 3. Ingest new files
     for file_path in new_files:
+        current += 1
+        console.print(f"  [{current}/{total_files}] Processing {file_path.name}...")
         try:
             metadata = ingest_document(file_path)
             console.print(f"  [green]✓[/green] Added {file_path.name} ({metadata.num_chunks} chunks)")
@@ -341,66 +285,70 @@ def sync(
             console.print(f"  [red]✗[/red] Failed to add {file_path.name}: {str(e)}")
 
     # Final summary
-    console.print(f"\n[bold]Sync Complete:[/bold]")
+    console.print(f"\n[bold]Ingestion Complete:[/bold]")
     console.print(f"  [green]Added:[/green] {len(new_files)} files")
     console.print(f"  [yellow]Updated:[/yellow] {len(modified_files)} files")
     console.print(f"  [red]Removed:[/red] {len(deleted_files)} files")
 
 
 @app.command()
-def query_cmd(
+def query(
     query_text: str,
-    mode: AnswerMode = settings.answer_mode,
     top_k: int = settings.default_top_k,
+    format: str = typer.Option("json", "--format", "-f", help="Output format: json or text"),
 ):
-    """Query the RAG system"""
-    from src.query import query
+    """Query the RAG system and retrieve relevant context chunks"""
+    from src.query import query as query_fn
+    from pathlib import Path
+    import json
 
-    result = query(query_text, top_k, mode)
+    result = query_fn(query_text, top_k)
 
-    console.print(f"[bold]Query:[/bold] {result.query}")
-    console.print(f"[bold]Mode:[/bold] {result.mode}\n")
+    if format == "json":
+        # JSON format with all information
+        output = {
+            "query": result.query,
+            "total_results": len(result.context),
+            "results": []
+        }
 
-    if result.context:
-        console.print("[bold]Context:[/bold]")
         for idx, res in enumerate(result.context, 1):
-            # Safely encode text for console display, replacing problematic characters
-            try:
-                preview = res.chunk.text[:200]
-            except UnicodeError:
-                preview = res.chunk.text[:200].encode('ascii', 'replace').decode('ascii')
+            chunk_data = {
+                "rank": idx,
+                "score": round(res.score, 4),
+                "distance": round(res.distance, 4),
+                "chunk": {
+                    "text": res.chunk.text,
+                    "page_num": res.chunk.page_num,
+                    "doc_id": res.chunk.doc_id,
+                },
+                "document": {
+                    "file_name": Path(res.chunk.metadata.get("file_path", "unknown")).name,
+                    "file_path": res.chunk.metadata.get("file_path", "unknown"),
+                    "doc_type": res.chunk.metadata.get("doc_type", "unknown"),
+                    "language": res.chunk.metadata.get("language", "unknown"),
+                    "ingested_at": res.chunk.metadata.get("ingested_at", "unknown"),
+                }
+            }
+            output["results"].append(chunk_data)
 
-            try:
-                console.print(f"  [{idx}] (Score: {res.score:.3f}) {preview}...")
-            except UnicodeEncodeError:
-                # Fallback: show score and source only
-                console.print(f"  [{idx}] (Score: {res.score:.3f}) [Text contains special characters - see source: page {res.chunk.page_num}]")
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+    else:
+        # Text format (legacy)
+        console.print(f"[bold]Query:[/bold] {result.query}\n")
 
-    if result.answer:
-        try:
-            console.print(f"\n[bold]Answer:[/bold]\n{result.answer}")
-        except UnicodeEncodeError:
-            # Fallback for answer with encoding issues
-            safe_answer = result.answer.encode('ascii', 'replace').decode('ascii')
-            console.print(f"\n[bold]Answer:[/bold]\n{safe_answer}")
+        if result.context:
+            console.print(f"[bold]Found {len(result.context)} relevant chunks:[/bold]\n")
+            for idx, res in enumerate(result.context, 1):
+                file_name = Path(res.chunk.metadata.get("file_path", "unknown")).name
+                page_info = f"page {res.chunk.page_num}" if res.chunk.page_num else "no page"
 
-
-@app.command()
-def search_cmd(query_text: str, top_k: int = settings.default_top_k):
-    """Search without generation"""
-    from src.retrieval.search import search
-
-    results = search(query_text, top_k)
-
-    table = Table(title="Search Results", box=None)
-    table.add_column("Rank", style="cyan")
-    table.add_column("Score", style="magenta")
-    table.add_column("Text", style="green")
-
-    for idx, result in enumerate(results, 1):
-        table.add_row(str(idx), f"{result.score:.3f}", result.chunk.text[:100] + "...")
-
-    console.print(table)
+                console.print(f"[cyan]Result {idx}[/cyan] (Score: {res.score:.3f})")
+                console.print(f"  File: {file_name} ({page_info})")
+                console.print(f"  Text: {res.chunk.text[:200]}...")
+                console.print()
+        else:
+            console.print("[yellow]No relevant context found[/yellow]")
 
 
 @app.command()
@@ -467,11 +415,11 @@ def models(
 ):
     """Manage offline models"""
     if download:
-        console.print("[yellow]Downloading all models to ./models...")
-        from src.utils import download_all_models
+        console.print("[yellow]Downloading embedding model to ./models...")
+        from src.utils import download_embedding_model
 
-        download_all_models()
-        console.print("[green]All models downloaded successfully!")
+        download_embedding_model()
+        console.print("[green]Embedding model downloaded successfully!")
         console.print(f"[green]Models saved to: {settings.models_dir}")
 
     elif verify:

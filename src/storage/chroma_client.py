@@ -65,10 +65,12 @@ def get_chroma_client() -> chromadb.ClientAPI:
             raise StorageError(f"Failed to connect to ChromaDB: {e}") from e
 
 
-def create_collection(
-    collection_name: str | None = None,
-    dimension: int | None = None,
-) -> None:
+def create_collection(collection_name: str | None = None) -> None:
+    """Create or get a ChromaDB collection.
+
+    Args:
+        collection_name: Name of the collection (defaults to config setting)
+    """
     collection_name = collection_name or settings.chroma_collection_name
 
     client = get_chroma_client()
@@ -114,6 +116,12 @@ def add_vectors(
         )
 
         logger.info(f"Inserted {len(ids)} vectors into {collection_name}")
+
+        # Incrementally add to BM25 index
+        from .bm25_index import get_bm25_index
+        bm25_index = get_bm25_index()
+        bm25_index.add_documents(documents, ids)
+        bm25_index.save()
 
     except Exception as e:
         raise StorageError(f"Failed to add vectors: {e}") from e
@@ -213,6 +221,10 @@ def reset_collection(collection_name: str | None = None) -> None:
         logger.info(f"Dropped collection: {collection_name}")
     except Exception:
         pass
+
+    # Clear BM25 index
+    from .bm25_index import get_bm25_index
+    get_bm25_index().clear()
 
     create_collection(collection_name)
 
@@ -317,6 +329,65 @@ def list_documents() -> list[dict]:
     return documents
 
 
+def remove_document_by_id(doc_id_or_partial: str) -> int:
+    """Remove a document by its ID (full or partial - last 6 chars).
+
+    Args:
+        doc_id_or_partial: Full doc_id or last 6 characters
+
+    Returns:
+        Number of chunks removed (0 if document not found)
+    """
+    client = get_chroma_client()
+    collection = client.get_collection(settings.chroma_collection_name)
+
+    # Get all documents
+    all_docs = list_documents()
+
+    # Find matching document
+    matching_doc = None
+    if len(doc_id_or_partial) == 6:
+        # Partial ID - match last 6 chars
+        matches = [doc for doc in all_docs if doc['doc_id'].endswith(doc_id_or_partial)]
+        if len(matches) == 0:
+            logger.warning(f"No document found with ID ending in: {doc_id_or_partial}")
+            return 0
+        elif len(matches) > 1:
+            logger.error(f"Multiple documents match ID {doc_id_or_partial}: {[d['doc_id'] for d in matches]}")
+            raise StorageError(f"Ambiguous ID: {doc_id_or_partial} matches multiple documents")
+        matching_doc = matches[0]
+    else:
+        # Full ID - exact match
+        matches = [doc for doc in all_docs if doc['doc_id'] == doc_id_or_partial]
+        if len(matches) == 0:
+            logger.warning(f"Document not found: {doc_id_or_partial}")
+            return 0
+        matching_doc = matches[0]
+
+    doc_id = matching_doc['doc_id']
+
+    # Get all chunks for this document
+    results = collection.get(where={"doc_id": doc_id})
+
+    if not results['ids']:
+        return 0
+
+    # Delete all chunks for this document
+    num_chunks = len(results['ids'])
+    chunk_ids = results['ids']
+    collection.delete(where={"doc_id": doc_id})
+
+    logger.info(f"Removed document {doc_id} ({num_chunks} chunks)")
+
+    # Incrementally remove from BM25 index
+    from .bm25_index import get_bm25_index
+    bm25_index = get_bm25_index()
+    bm25_index.remove_documents(chunk_ids)
+    bm25_index.save()
+
+    return num_chunks
+
+
 def remove_document(file_path: str | Path) -> int:
     """Remove a document and all its chunks from ChromaDB.
 
@@ -342,9 +413,16 @@ def remove_document(file_path: str | Path) -> int:
         return 0
 
     # Delete all chunks for this document
+    chunk_ids = results['ids']
     collection.delete(where={"doc_id": doc_id})
 
-    num_removed = len(results['ids'])
+    num_removed = len(chunk_ids)
     logger.info(f"Removed document {file_path}: {num_removed} chunks")
+
+    # Incrementally remove from BM25 index
+    from .bm25_index import get_bm25_index
+    bm25_index = get_bm25_index()
+    bm25_index.remove_documents(chunk_ids)
+    bm25_index.save()
 
     return num_removed
