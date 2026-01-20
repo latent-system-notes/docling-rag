@@ -11,10 +11,7 @@ from typing import BinaryIO
 
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import (
-    PdfPipelineOptions,
-    OcrOptions,
-)
+from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import DoclingDocument
 
@@ -33,27 +30,31 @@ logger = get_logger(__name__)
 def _get_ocr_options():
     """Get OCR options based on configured engine.
 
-    Returns appropriate OcrOptions subclass based on settings.ocr_engine:
-    - "auto": Let Docling choose the best available engine
-    - "rapidocr": Force RapidOCR engine
-    - "easyocr": Force EasyOCR engine
-    - "tesseract": Force Tesseract engine
-    - "ocrmac": Force OCRMac engine (macOS only)
+    Returns appropriate OcrOptions subclass based on settings.ocr_engine.
+    Each subclass has a 'kind' ClassVar that identifies the engine.
+
+    Available engines:
+    - "auto": Let Docling choose the best available engine (OcrAutoOptions)
+    - "rapidocr": Force RapidOCR engine (RapidOcrOptions)
+    - "easyocr": Force EasyOCR engine (EasyOcrOptions)
+    - "tesseract": Force Tesseract CLI (TesseractCliOcrOptions)
+    - "tesserocr": Force Tesseract library (TesseractOcrOptions)
+    - "ocrmac": Force OCRMac engine - macOS only (OcrMacOptions)
     """
     engine = settings.ocr_engine.lower()
+    langs = settings.ocr_languages.split("+") if settings.ocr_languages else []
 
     if engine == "auto":
-        # Use base OcrOptions for automatic engine selection
-        langs = settings.ocr_languages.split("+") if settings.ocr_languages else []
-        return OcrOptions(
-            lang=langs,
+        # Use OcrAutoOptions for automatic engine selection
+        from docling.datamodel.pipeline_options import OcrAutoOptions
+        return OcrAutoOptions(
+            lang=langs if langs else ['en'],
             force_full_page_ocr=True,
         )
     elif engine == "rapidocr":
         from docling.datamodel.pipeline_options import RapidOcrOptions
         # RapidOCR uses full language names (english, arabic, chinese, etc.)
         lang_map = {'eng': 'english', 'ara': 'arabic', 'chi': 'chinese', 'jpn': 'japanese'}
-        langs = settings.ocr_languages.split("+") if settings.ocr_languages else []
         rapidocr_langs = [lang_map.get(lang, lang) for lang in langs]
         return RapidOcrOptions(
             lang=rapidocr_langs if rapidocr_langs else ['english'],
@@ -62,17 +63,33 @@ def _get_ocr_options():
     elif engine == "easyocr":
         from docling.datamodel.pipeline_options import EasyOcrOptions
         return EasyOcrOptions(
+            lang=langs if langs else ['en'],
             force_full_page_ocr=True,
         )
     elif engine == "tesseract":
+        from docling.datamodel.pipeline_options import TesseractCliOcrOptions
+        return TesseractCliOcrOptions(
+            lang=langs if langs else ['eng'],
+            force_full_page_ocr=True,
+        )
+    elif engine == "tesserocr":
         from docling.datamodel.pipeline_options import TesseractOcrOptions
         return TesseractOcrOptions(
+            lang=langs if langs else ['eng'],
+            force_full_page_ocr=True,
+        )
+    elif engine == "ocrmac":
+        from docling.datamodel.pipeline_options import OcrMacOptions
+        return OcrMacOptions(
+            lang=langs if langs else ['en'],
             force_full_page_ocr=True,
         )
     else:
         # Default to auto if unknown engine specified
         logger.warning(f"Unknown OCR engine '{engine}', falling back to 'auto'")
-        return OcrOptions(
+        from docling.datamodel.pipeline_options import OcrAutoOptions
+        return OcrAutoOptions(
+            lang=langs if langs else ['en'],
             force_full_page_ocr=True,
         )
 
