@@ -200,22 +200,6 @@ wheels = [
 ]
 
 [[package]]
-name = "bitsandbytes"
-version = "0.49.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "torch" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/6f/32d0526e4e4ad309d9e7502c018399bb23b63f39277a361c305092e2f885/bitsandbytes-0.49.1-py3-none-macosx_14_0_arm64.whl", hash = "sha256:9de01d4384b6c71ef9ab052b98457dc0e4fff8fe06ab14833b5b712700deb005", size = 129848, upload-time = "2026-01-08T14:31:26.134Z" },
-    { url = "https://files.pythonhosted.org/packages/11/dd/5820e09213a3f7c0ee5aff20fce8b362ce935f9dd9958827274de4eaeec6/bitsandbytes-0.49.1-py3-none-manylinux_2_24_aarch64.whl", hash = "sha256:acd4730a0db3762d286707f4a3bc1d013d21dd5f0e441900da57ec4198578d4e", size = 31065659, upload-time = "2026-01-08T14:31:28.676Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/4f/02d3cb62a1b0b5a1ca7ff03dce3606be1bf3ead4744f47eb762dbf471069/bitsandbytes-0.49.1-py3-none-manylinux_2_24_x86_64.whl", hash = "sha256:e7940bf32457dc2e553685285b2a86e82f5ec10b2ae39776c408714f9ae6983c", size = 59054193, upload-time = "2026-01-08T14:31:31.743Z" },
-    { url = "https://files.pythonhosted.org/packages/ba/53/7cfbe3a93354764be85c2dfcbfc5b6536413e598155aa7ef7e85d74c9e49/bitsandbytes-0.49.1-py3-none-win_amd64.whl", hash = "sha256:6ead0763f4beb936f9a09acb49ec094a259180906fc0605d9ca0617249c3c798", size = 54700630, upload-time = "2026-01-08T14:31:35.638Z" },
-]
-
-[[package]]
 name = "build"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -600,56 +584,6 @@ wheels = [
 ]
 
 [[package]]
-name = "dockling-rag"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "accelerate" },
-    { name = "bitsandbytes" },
-    { name = "chromadb" },
-    { name = "docling" },
-    { name = "fastmcp" },
-    { name = "langdetect" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "rich" },
-    { name = "sentence-transformers" },
-    { name = "torch" },
-    { name = "tqdm" },
-    { name = "transformers" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate", specifier = ">=0.26" },
-    { name = "bitsandbytes", specifier = ">=0.41" },
-    { name = "chromadb", specifier = ">=0.4.0" },
-    { name = "docling", specifier = ">=2.68.0" },
-    { name = "fastmcp", specifier = ">=0.4" },
-    { name = "langdetect", specifier = ">=1.0.9" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "rich", specifier = ">=13.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3" },
-    { name = "sentence-transformers", specifier = ">=2.5" },
-    { name = "torch", specifier = ">=2.2" },
-    { name = "tqdm", specifier = ">=4.65" },
-    { name = "transformers", specifier = ">=4.40" },
-    { name = "typer", specifier = ">=0.12" },
-]
-provides-extras = ["dev"]
-
-[[package]]
 name = "docling"
 version = "2.68.0"
 source = { registry = "https://pypi.org/simple" }
@@ -774,6 +708,52 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4e/69/b0732d6b47e80c9108ed8c8ed1db880beddac3a49d68f5f5e853a90553c9/docling_parse-4.7.3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:29c91f78c877ae4637011efdb478f20a571e6794be924795b3469958a6401cd6", size = 15092644, upload-time = "2026-01-14T14:18:01.05Z" },
     { url = "https://files.pythonhosted.org/packages/93/2e/7ae85c9ea1e75cf485f5e2af39bf1706c49570f8856b6c345098d25a9078/docling_parse-4.7.3-cp314-cp314-win_amd64.whl", hash = "sha256:75522790df921b6be5d86cf26d184a4af97c1c65e2d22698a9516bc049c398cf", size = 16787387, upload-time = "2026-01-14T14:18:03.353Z" },
 ]
+
+[[package]]
+name = "docling-rag"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "chromadb" },
+    { name = "docling" },
+    { name = "fastmcp" },
+    { name = "langdetect" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "rank-bm25" },
+    { name = "rich" },
+    { name = "sentence-transformers" },
+    { name = "torch" },
+    { name = "tqdm" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "chromadb", specifier = ">=0.4.0" },
+    { name = "docling", specifier = ">=2.68.0" },
+    { name = "fastmcp", specifier = ">=0.4" },
+    { name = "langdetect", specifier = ">=1.0.9" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "rank-bm25", specifier = ">=0.2.2" },
+    { name = "rich", specifier = ">=13.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3" },
+    { name = "sentence-transformers", specifier = ">=2.5" },
+    { name = "torch", specifier = ">=2.2" },
+    { name = "tqdm", specifier = ">=4.65" },
+    { name = "typer", specifier = ">=0.12" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "docstring-parser"
@@ -3451,6 +3431,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/da/92/1446574745d74df0c92e6aa4a7b0b3130706a4142b2d1a5869f2eaa423c6/pyyaml-6.0.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65", size = 829923, upload-time = "2025-09-25T21:32:54.537Z" },
     { url = "https://files.pythonhosted.org/packages/f0/7a/1c7270340330e575b92f397352af856a8c06f230aa3e76f86b39d01b416a/pyyaml-6.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:4ad1906908f2f5ae4e5a8ddfce73c320c2a1429ec52eafd27138b7f1cbe341c9", size = 174062, upload-time = "2025-09-25T21:32:55.767Z" },
     { url = "https://files.pythonhosted.org/packages/f1/12/de94a39c2ef588c7e6455cfbe7343d3b2dc9d6b6b2f40c4c6565744c873d/pyyaml-6.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:ebc55a14a21cb14062aa4162f906cd962b28e2e9ea38f9b4391244cd8de4ae0b", size = 149341, upload-time = "2025-09-25T21:32:56.828Z" },
+]
+
+[[package]]
+name = "rank-bm25"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fc/0a/f9579384aa017d8b4c15613f86954b92a95a93d641cc849182467cf0bb3b/rank_bm25-0.2.2.tar.gz", hash = "sha256:096ccef76f8188563419aaf384a02f0ea459503fdf77901378d4fd9d87e5e51d", size = 8347, upload-time = "2022-02-16T12:10:52.196Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/21/f691fb2613100a62b3fa91e9988c991e9ca5b89ea31c0d3152a3210344f9/rank_bm25-0.2.2-py3-none-any.whl", hash = "sha256:7bd4a95571adadfc271746fa146a4bcfd89c0cf731e49c3d1ad863290adbe8ae", size = 8584, upload-time = "2022-02-16T12:10:50.626Z" },
 ]
 
 [[package]]

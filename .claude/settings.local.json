@@ -37,7 +37,17 @@
       "Bash(pip show:*)",
       "WebFetch(domain:deepwiki.com)",
       "WebFetch(domain:github.com)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(rag ingest:*)",
+      "Bash(tasklist /FI \"IMAGENAME eq python.exe\")",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(rag stats:*)",
+      "Bash(rag list-docs:*)",
+      "Bash(uv pip list:*)",
+      "Bash(rag query:*)",
+      "Bash(rag remove:*)",
+      "Bash(timeout:*)"
     ]
   }
 }

@@ -173,10 +173,10 @@ def ingest(
 
         try:
             metadata = ingest_document(file_path)
-            console.print(f"[green]✓ Ingested: {file_path.name} ({metadata.num_chunks} chunks)")
+            console.print(f"[green][OK] Ingested: {file_path.name} ({metadata.num_chunks} chunks)")
         except Exception as e:
             logger.error(f"Failed to ingest {file_path}: {e}")
-            console.print(f"[red]✗ Failed to ingest {file_path.name}: {str(e)}")
+            console.print(f"[red][ERR] Failed to ingest {file_path.name}: {str(e)}")
             raise typer.Exit(1)
         return
 
@@ -225,7 +225,7 @@ def ingest(
     console.print(f"  [red]Deleted files:[/red] {len(deleted_files)}")
 
     if not new_files and not modified_files and not deleted_files:
-        console.print(f"\n[green]✓ Everything is up to date!")
+        console.print(f"\n[green][OK] Everything is up to date!")
         return
 
     if dry_run:
@@ -259,7 +259,7 @@ def ingest(
         current += 1
         console.print(f"  [{current}/{total_files}] Removing {file_path.name}...")
         num_removed = remove_document(file_path)
-        console.print(f"  [red]✗[/red] Removed {file_path.name} ({num_removed} chunks)")
+        console.print(f"  [red][ERR][/red] Removed {file_path.name} ({num_removed} chunks)")
 
     # 2. Re-ingest modified files (remove old version first)
     for file_path in modified_files:
@@ -271,7 +271,7 @@ def ingest(
             console.print(f"  [yellow]↻[/yellow] Updated {file_path.name} ({metadata.num_chunks} chunks)")
         except Exception as e:
             logger.error(f"Failed to update {file_path}: {e}")
-            console.print(f"  [red]✗[/red] Failed to update {file_path.name}: {str(e)}")
+            console.print(f"  [red][ERR][/red] Failed to update {file_path.name}: {str(e)}")
 
     # 3. Ingest new files
     for file_path in new_files:
@@ -279,10 +279,10 @@ def ingest(
         console.print(f"  [{current}/{total_files}] Processing {file_path.name}...")
         try:
             metadata = ingest_document(file_path)
-            console.print(f"  [green]✓[/green] Added {file_path.name} ({metadata.num_chunks} chunks)")
+            console.print(f"  [green][OK][/green] Added {file_path.name} ({metadata.num_chunks} chunks)")
         except Exception as e:
             logger.error(f"Failed to ingest {file_path}: {e}")
-            console.print(f"  [red]✗[/red] Failed to add {file_path.name}: {str(e)}")
+            console.print(f"  [red][ERR][/red] Failed to add {file_path.name}: {str(e)}")
 
     # Final summary
     console.print(f"\n[bold]Ingestion Complete:[/bold]")
@@ -332,7 +332,7 @@ def query(
             }
             output["results"].append(chunk_data)
 
-        print(json.dumps(output, ensure_ascii=False, indent=2))
+        print(json.dumps(output, ensure_ascii=True, indent=2))
     else:
         # Text format (legacy)
         console.print(f"[bold]Query:[/bold] {result.query}\n")

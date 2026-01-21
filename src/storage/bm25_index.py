@@ -66,6 +66,10 @@ class BM25Index:
         if not documents:
             return
 
+        # Load existing index from disk if not already loaded
+        if not self.documents and self.index_path.exists():
+            self.load()
+
         self.documents.extend(documents)
         self.doc_ids.extend(doc_ids)
         self.is_dirty = True  # Mark for rebuild on next search
@@ -80,6 +84,10 @@ class BM25Index:
         """
         if not doc_ids_to_remove:
             return
+
+        # Load existing index from disk if not already loaded
+        if not self.documents and self.index_path.exists():
+            self.load()
 
         # Convert to set for faster lookup
         remove_set = set(doc_ids_to_remove)
@@ -102,6 +110,10 @@ class BM25Index:
 
     def save(self) -> None:
         """Save BM25 index to disk."""
+        # Rebuild if dirty before saving
+        if self.is_dirty and self.documents:
+            self._rebuild_index()
+
         if self.index is None:
             logger.warning("No BM25 index to save")
             return
