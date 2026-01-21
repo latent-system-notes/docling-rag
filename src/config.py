@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     chroma_persist_dir: str = "./data/chroma"
     chroma_collection_name: str = "documents"
 
+    # Checkpoint directory for resumable ingestion
+    checkpoint_dir: Path = Path("./data/checkpoints")
+    checkpoint_retention_days: int = 7
+
     # ChromaDB connection mode
     chroma_mode: str = "persistent"  # "persistent" or "http"
 

@@ -102,7 +102,7 @@ def _get_ocr_options():
 def load_document(
     source: str | Path | bytes | BinaryIO,
     doc_format: str | None = None,
-) -> DoclingDocument:
+) -> tuple[DoclingDocument, int | None]:
     """Load a document using IBM Docling.
 
     Docling is a powerful document processor that handles:
@@ -117,7 +117,8 @@ def load_document(
         doc_format: Optional format hint (auto-detected if None)
 
     Returns:
-        Parsed DoclingDocument with text, structure, and metadata
+        Tuple of (DoclingDocument, page_count)
+        page_count is None for non-paginated documents
 
     Raises:
         DocumentLoadError: If document cannot be loaded
@@ -125,6 +126,22 @@ def load_document(
     try:
         # Enforce our logging format on RapidOCR (it adds its own handlers)
         enforce_logging_format()
+
+        # Get page count for progress indication (PDF only)
+        page_count = None
+        if isinstance(source, (str, Path)):
+            source_path = Path(source)
+            if source_path.suffix.lower() == '.pdf':
+                try:
+                    import pypdf
+                    with open(source_path, 'rb') as f:
+                        pdf_reader = pypdf.PdfReader(f)
+                        page_count = len(pdf_reader.pages)
+                    if page_count:
+                        logger.info(f"Processing PDF with {page_count} pages (OCR enabled: {settings.enable_ocr})")
+                except Exception:
+                    # If page count detection fails, continue without it
+                    pass
 
         # Force CPU-only processing (no GPU usage)
         accelerator_options = AcceleratorOptions(
@@ -151,9 +168,19 @@ def load_document(
             },
         )
 
-        # Convert and return the document
+        # Show progress indication for OCR processing
+        if settings.enable_ocr and page_count:
+            logger.info(f"Starting OCR processing (this may take several minutes for large documents)...")
+
+        # Convert the document
+        # Note: Docling processes page-by-page internally, but doesn't expose progress callbacks
+        # The processing time is roughly proportional to page count for OCR
         result = converter.convert(source)
-        return result.document
+
+        if page_count:
+            logger.info(f"Document processing complete ({page_count} pages processed)")
+
+        return result.document, page_count
 
     except Exception as e:
         raise DocumentLoadError(f"Failed to load document: {e}") from e
@@ -167,7 +194,8 @@ def load_document(
 def extract_metadata(
     doc: DoclingDocument,
     file_path: str | Path,
-    num_chunks: int
+    num_chunks: int,
+    num_pages: int | None = None
 ) -> DocumentMetadata:
     """Extract metadata from a document.
 
@@ -180,6 +208,7 @@ def extract_metadata(
         doc: Parsed Docling document
         file_path: Original file path
         num_chunks: Number of chunks created from this document
+        num_pages: Number of pages (None if not applicable)
 
     Returns:
         DocumentMetadata object with doc_id, language, etc.
@@ -213,5 +242,6 @@ def extract_metadata(
         language=language,
         file_path=str(file_path),
         num_chunks=num_chunks,
+        num_pages=num_pages,
         ingested_at=datetime.now(),
     )

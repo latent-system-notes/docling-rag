@@ -17,7 +17,9 @@ console = Console()
 
 @app.command()
 def list_docs(
-    full_path: bool = typer.Option(False, "--full-path", "-f", help="Show full file paths instead of just filenames")
+    full_path: bool = typer.Option(False, "--full-path", "-f", help="Show full file paths instead of just filenames"),
+    limit: int = typer.Option(None, "--limit", "-l", help="Maximum number of documents to show"),
+    offset: int = typer.Option(0, "--offset", "-o", help="Number of documents to skip (for pagination)"),
 ):
     """List all indexed documents with audit information.
 
@@ -27,6 +29,11 @@ def list_docs(
     - Language
     - Number of chunks
     - Ingestion timestamp
+
+    Examples:
+        rag list-docs                    # Show all documents
+        rag list-docs --limit 20         # Show first 20 documents
+        rag list-docs --limit 20 --offset 20  # Show next 20 documents (page 2)
     """
     from datetime import datetime
     from pathlib import Path
@@ -54,13 +61,29 @@ def list_docs(
 
     initialize_collections()
 
-    documents = list_documents()
+    # Apply pagination
+    documents = list_documents(limit=limit, offset=offset)
+
+    # Get total count for display
+    total_count = len(list_documents())
 
     if not documents:
-        console.print("[yellow]No documents indexed yet.")
+        if offset > 0:
+            console.print(f"[yellow]No documents found at offset {offset}. Total documents: {total_count}")
+        else:
+            console.print("[yellow]No documents indexed yet.")
         return
 
-    table = Table(title=f"Indexed Documents ({len(documents)} total)", box=None, show_header=True)
+    # Create table title with pagination info
+    if limit or offset:
+        showing = len(documents)
+        start = offset + 1
+        end = offset + showing
+        title = f"Indexed Documents (showing {start}-{end} of {total_count} total)"
+    else:
+        title = f"Indexed Documents ({total_count} total)"
+
+    table = Table(title=title, box=None, show_header=True)
     table.add_column("ID", style="dim", width=6)
     table.add_column("File Name", style="cyan", no_wrap=True)
     table.add_column("Type", style="magenta", width=6)
@@ -100,8 +123,12 @@ def list_docs(
     console.print(table)
 
     # Summary statistics
-    total_chunks = sum(doc['num_chunks'] for doc in documents)
-    console.print(f"\n[bold]Total:[/bold] {len(documents)} documents, {total_chunks} chunks")
+    shown_chunks = sum(doc['num_chunks'] for doc in documents)
+    if limit or offset:
+        console.print(f"\n[bold]Showing:[/bold] {len(documents)} documents, {shown_chunks} chunks")
+        console.print(f"[bold]Total in database:[/bold] {total_count} documents")
+    else:
+        console.print(f"\n[bold]Total:[/bold] {total_count} documents, {shown_chunks} chunks")
 
 
 @app.command()
@@ -143,6 +170,7 @@ def ingest(
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Scan subdirectories"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be updated without doing it"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-ingest even if already exists"),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from checkpoint if exists (default: enabled)"),
 ):
     """Ingest file(s) or folder by ingesting new/modified files and removing deleted ones.
 
@@ -172,7 +200,7 @@ def ingest(
             return
 
         try:
-            metadata = ingest_document(file_path)
+            metadata = ingest_document(file_path, resume=resume)
             console.print(f"[green][OK] Ingested: {file_path.name} ({metadata.num_chunks} chunks)")
         except Exception as e:
             logger.error(f"Failed to ingest {file_path}: {e}")
@@ -267,7 +295,7 @@ def ingest(
         console.print(f"  [{current}/{total_files}] Updating {file_path.name}...")
         remove_document(file_path)  # Remove old version
         try:
-            metadata = ingest_document(file_path)
+            metadata = ingest_document(file_path, resume=resume)
             console.print(f"  [yellow]↻[/yellow] Updated {file_path.name} ({metadata.num_chunks} chunks)")
         except Exception as e:
             logger.error(f"Failed to update {file_path}: {e}")
@@ -278,7 +306,7 @@ def ingest(
         current += 1
         console.print(f"  [{current}/{total_files}] Processing {file_path.name}...")
         try:
-            metadata = ingest_document(file_path)
+            metadata = ingest_document(file_path, resume=resume)
             console.print(f"  [green][OK][/green] Added {file_path.name} ({metadata.num_chunks} chunks)")
         except Exception as e:
             logger.error(f"Failed to ingest {file_path}: {e}")
@@ -454,6 +482,226 @@ def models(
 
         console.print(table)
         console.print(f"\n[bold]Base directory:[/bold] {settings.models_dir}")
+
+
+@app.command()
+def cleanup():
+    """Cleanup cached resources and free memory.
+
+    Clears:
+    - Embedding model cache (~420MB)
+    - ChromaDB client connections
+    - BM25 index from memory
+
+    Useful after batch operations or to free memory in long-running processes.
+    """
+    from src.utils import cleanup_all_resources
+
+    console.print("[yellow]Cleaning up cached resources...")
+    cleanup_all_resources()
+    console.print("[green]Cleanup complete! Memory freed.")
+
+
+@app.command()
+def checkpoints_list():
+    """List all active ingestion checkpoints.
+
+    Shows checkpoints for documents that have incomplete ingestion.
+    Resume ingestion by re-running the ingest command on the file.
+    """
+    from src.ingestion.checkpoint import list_checkpoints
+    from datetime import datetime
+
+    checkpoints = list_checkpoints()
+
+    if not checkpoints:
+        console.print("[yellow]No active checkpoints found.")
+        return
+
+    table = Table(title=f"Active Checkpoints ({len(checkpoints)} total)", box=None, show_header=True)
+    table.add_column("Doc ID", style="dim", width=8)
+    table.add_column("File Path", style="cyan")
+    table.add_column("Total", style="green", justify="right", width=8)
+    table.add_column("Done", style="green", justify="right", width=8)
+    table.add_column("Progress", style="yellow", width=10)
+    table.add_column("Last Update", style="blue", width=19)
+
+    for cp in checkpoints:
+        doc_id_short = cp['doc_id'][-8:] if len(cp['doc_id']) >= 8 else cp['doc_id']
+        file_path = Path(cp['file_path']).name  # Show just filename
+
+        # Calculate progress percentage
+        total = cp['total_chunks']
+        # processed_batches is count of batches, we need to estimate chunks
+        # This is approximate since last batch might be partial
+        done_batches = cp['processed_batches']
+        # Assuming batch_size=100 (default)
+        progress_pct = (done_batches * 100 / ((total + 99) // 100)) if total > 0 else 0
+        progress_str = f"{progress_pct:.0f}%"
+
+        # Format timestamp
+        timestamp_str = cp['timestamp']
+        if timestamp_str:
+            try:
+                dt = datetime.fromisoformat(timestamp_str)
+                timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                pass
+
+        table.add_row(
+            doc_id_short,
+            file_path,
+            str(total),
+            str(done_batches),
+            progress_str,
+            timestamp_str
+        )
+
+    console.print(table)
+    console.print(f"\n[bold]Tip:[/bold] Resume ingestion by running: rag ingest <file_path>")
+
+
+@app.command()
+def checkpoints_clean(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    stale_only: bool = typer.Option(False, "--stale-only", help="Only delete stale checkpoints (older than retention period)"),
+):
+    """Delete ingestion checkpoints.
+
+    By default, deletes ALL checkpoints. Use --stale-only to only delete
+    checkpoints older than the retention period (default: 7 days).
+
+    Examples:
+        rag checkpoints-clean                  # Delete all checkpoints (with confirmation)
+        rag checkpoints-clean -y               # Delete all checkpoints (no confirmation)
+        rag checkpoints-clean --stale-only     # Delete only stale checkpoints
+    """
+    from src.ingestion.checkpoint import clean_all_checkpoints, clean_stale_checkpoints
+
+    if stale_only:
+        count = clean_stale_checkpoints()
+        if count > 0:
+            console.print(f"[green]Deleted {count} stale checkpoint(s)")
+        else:
+            console.print("[yellow]No stale checkpoints found")
+        return
+
+    # Delete all checkpoints
+    if not yes:
+        if not typer.confirm("Delete ALL checkpoints? This will discard all resume progress."):
+            console.print("[yellow]Cancelled.")
+            return
+
+    count = clean_all_checkpoints()
+    if count > 0:
+        console.print(f"[green]Deleted {count} checkpoint(s)")
+    else:
+        console.print("[yellow]No checkpoints found")
+
+
+@app.command()
+def ingestion_log(
+    limit: int = typer.Option(20, "--limit", "-l", help="Number of recent entries to show"),
+    export: str = typer.Option(None, "--export", "-e", help="Export full log to this path")
+):
+    """View ingestion audit log.
+
+    Shows a history of all document ingestions including:
+    - Timestamp when ingestion started
+    - File name and type
+    - Number of pages (for PDFs)
+    - Number of chunks created
+    - Status (completed, resumed, or failed)
+    - Duration in seconds
+
+    The log is automatically updated during ingestion and stored as a CSV file
+    that can be opened in Excel or any spreadsheet application.
+
+    Examples:
+        rag ingestion-log                    # Show last 20 entries
+        rag ingestion-log --limit 50         # Show last 50 entries
+        rag ingestion-log --export log.csv   # Export full log
+    """
+    import csv
+    import shutil
+    from src.ingestion.audit_log import get_audit_log_path
+
+    csv_path = get_audit_log_path()
+
+    if not csv_path.exists():
+        console.print("[yellow]No ingestion log found. Ingest some documents first.")
+        return
+
+    if export:
+        # Export to specified path
+        export_path = Path(export)
+        shutil.copy(csv_path, export_path)
+        console.print(f"[green]Exported log to: {export_path}")
+        return
+
+    # Read and display last N entries
+    with open(csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    if not rows:
+        console.print("[yellow]Log is empty.")
+        return
+
+    # Show most recent entries
+    recent_rows = rows[-limit:] if len(rows) > limit else rows
+    recent_rows.reverse()  # Most recent first
+
+    table = Table(title=f"Recent Ingestion Log ({len(recent_rows)} of {len(rows)} total)", box=None)
+    table.add_column("Time", style="yellow", width=16)
+    table.add_column("File", style="cyan", width=30)
+    table.add_column("Type", style="blue", width=6)
+    table.add_column("Pages", style="green", justify="right", width=6)
+    table.add_column("Chunks", style="green", justify="right", width=7)
+    table.add_column("Status", style="magenta", width=10)
+    table.add_column("Duration", style="dim", justify="right", width=8)
+
+    for row in recent_rows:
+        # Format timestamp (show only date and time, not seconds)
+        timestamp = row['timestamp'][:16]  # Truncate to YYYY-MM-DD HH:MM
+
+        # Truncate filename if too long
+        filename = Path(row['file_name']).name
+        if len(filename) > 30:
+            filename = filename[:27] + "..."
+
+        # Format status with color
+        status = row['status']
+        if status == "completed":
+            status_display = "[green]completed[/green]"
+        elif status == "failed":
+            status_display = "[red]failed[/red]"
+        elif status == "resumed":
+            status_display = "[yellow]resumed[/yellow]"
+        else:
+            status_display = status
+
+        # Format duration
+        duration = f"{float(row['duration_seconds']):.1f}s" if row['duration_seconds'] else "-"
+
+        table.add_row(
+            timestamp,
+            filename,
+            row['doc_type'],
+            row['num_pages'] or "-",
+            row['num_chunks'],
+            status_display,
+            duration
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]Full log location: {csv_path}[/dim]")
+
+    # Calculate statistics
+    failed_count = sum(1 for r in rows if r['status'] == 'failed')
+    completed_count = sum(1 for r in rows if r['status'] in ['completed', 'resumed'])
+
+    console.print(f"[dim]Total ingestions: {len(rows)} | Completed: {completed_count} | Failed: {failed_count}[/dim]")
 
 
 if __name__ == "__main__":

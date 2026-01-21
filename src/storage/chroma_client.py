@@ -1,5 +1,5 @@
-from functools import cache
 from pathlib import Path
+from typing import Optional
 
 import chromadb
 import numpy as np
@@ -10,15 +10,24 @@ from ..models import StorageError
 
 logger = get_logger(__name__)
 
+# Manual cache for ChromaDB client to allow cleanup
+_chroma_client_cache: Optional[chromadb.ClientAPI] = None
 
-@cache
+
 def get_chroma_client() -> chromadb.ClientAPI:
     """Get ChromaDB client based on configured mode.
+
+    Uses manual caching to allow proper resource cleanup.
 
     Modes:
     - "persistent": Direct SQLite file access (current behavior)
     - "http": Connect to remote ChromaDB server (recommended)
     """
+    global _chroma_client_cache
+
+    # Return cached client if available
+    if _chroma_client_cache is not None:
+        return _chroma_client_cache
 
     if settings.chroma_mode == "http":
         # HTTP Mode - Connect to ChromaDB server
@@ -41,6 +50,7 @@ def get_chroma_client() -> chromadb.ClientAPI:
                 headers=headers,
                 settings=ChromaSettings(anonymized_telemetry=False),
             )
+            _chroma_client_cache = client
             return client
         except Exception as e:
             raise StorageError(
@@ -60,9 +70,31 @@ def get_chroma_client() -> chromadb.ClientAPI:
                 path=str(persist_dir),
                 settings=ChromaSettings(anonymized_telemetry=False),
             )
+            _chroma_client_cache = client
             return client
         except Exception as e:
             raise StorageError(f"Failed to connect to ChromaDB: {e}") from e
+
+
+def cleanup_chroma_client() -> None:
+    """Cleanup and release the cached ChromaDB client.
+
+    Call this when you want to release database connections and resources.
+    Useful for long-running processes or after batch operations.
+    """
+    global _chroma_client_cache
+
+    if _chroma_client_cache is not None:
+        # Try to clear the client properly
+        try:
+            # For persistent clients, this helps release SQLite connections
+            if hasattr(_chroma_client_cache, 'clear_system_cache'):
+                _chroma_client_cache.clear_system_cache()
+        except Exception as e:
+            logger.warning(f"Error during client cleanup: {e}")
+        finally:
+            _chroma_client_cache = None
+            logger.info("ChromaDB client cache cleared")
 
 
 def create_collection(collection_name: str | None = None) -> None:
@@ -86,12 +118,26 @@ def create_collection(collection_name: str | None = None) -> None:
         raise StorageError(f"Failed to create collection: {e}") from e
 
 
-def add_vectors(
+def _add_vectors_chromadb_only(
     ids: list[str],
     vectors: np.ndarray,
     metadata: list[dict],
     collection_name: str | None = None,
 ) -> None:
+    """Add vectors to ChromaDB only (without BM25).
+
+    This is a low-level function used for atomic batch commits.
+    Use add_vectors() for normal operations.
+
+    Args:
+        ids: List of chunk IDs
+        vectors: Embedding vectors
+        metadata: Chunk metadata (must include 'text' field)
+        collection_name: Collection name (defaults to config setting)
+
+    Raises:
+        StorageError: If adding vectors fails
+    """
     collection_name = collection_name or settings.chroma_collection_name
     client = get_chroma_client()
 
@@ -115,13 +161,76 @@ def add_vectors(
             metadatas=metadatas,
         )
 
-        logger.info(f"Inserted {len(ids)} vectors into {collection_name}")
+        logger.debug(f"Added {len(ids)} vectors to ChromaDB (BM25 not updated)")
 
-        # Incrementally add to BM25 index
+    except Exception as e:
+        raise StorageError(f"Failed to add vectors to ChromaDB: {e}") from e
+
+
+def rollback_batch(ids: list[str], collection_name: str | None = None) -> None:
+    """Remove a batch of chunks from ChromaDB (rollback operation).
+
+    Used to rollback a batch when BM25 save fails during atomic commit.
+
+    Args:
+        ids: List of chunk IDs to remove
+        collection_name: Collection name (defaults to config setting)
+    """
+    collection_name = collection_name or settings.chroma_collection_name
+    client = get_chroma_client()
+
+    try:
+        collection = client.get_collection(collection_name)
+        # ChromaDB allows deleting by ID list directly
+        collection.delete(ids=ids)
+        logger.warning(f"Rolled back {len(ids)} vectors from ChromaDB")
+
+    except Exception as e:
+        logger.error(f"Failed to rollback batch: {e}")
+        raise StorageError(f"Failed to rollback batch: {e}") from e
+
+
+def add_vectors(
+    ids: list[str],
+    vectors: np.ndarray,
+    metadata: list[dict],
+    collection_name: str | None = None,
+) -> None:
+    """Add vectors to ChromaDB and BM25 atomically.
+
+    This function ensures both ChromaDB and BM25 are updated together.
+    If BM25 save fails, ChromaDB changes are rolled back.
+
+    Args:
+        ids: List of chunk IDs
+        vectors: Embedding vectors
+        metadata: Chunk metadata (must include 'text' field)
+        collection_name: Collection name (defaults to config setting)
+
+    Raises:
+        StorageError: If adding vectors fails
+    """
+    collection_name = collection_name or settings.chroma_collection_name
+
+    documents = [meta.get("text", "") for meta in metadata]
+
+    try:
+        # Step 1: Add to ChromaDB
+        _add_vectors_chromadb_only(ids, vectors, metadata, collection_name)
+
+        # Step 2: Add to BM25 and save atomically
         from .bm25_index import get_bm25_index
         bm25_index = get_bm25_index()
-        bm25_index.add_documents(documents, ids)
-        bm25_index.save()
+
+        try:
+            bm25_index.add_documents_atomic(documents, ids)
+        except Exception as bm25_error:
+            # Rollback ChromaDB changes
+            logger.error(f"BM25 operation failed, rolling back ChromaDB changes")
+            rollback_batch(ids, collection_name)
+            raise
+
+        logger.info(f"Successfully added {len(ids)} vectors to both ChromaDB and BM25")
 
     except Exception as e:
         raise StorageError(f"Failed to add vectors: {e}") from e
@@ -276,7 +385,7 @@ def document_exists(file_path: str | Path) -> bool:
         return False
 
 
-def list_documents() -> list[dict]:
+def list_documents(limit: int | None = None, offset: int = 0) -> list[dict]:
     """List all unique documents in the collection.
 
     Returns a list of document information including:
@@ -287,6 +396,10 @@ def list_documents() -> list[dict]:
     - num_chunks: Number of chunks
     - ingested_at: Timestamp of ingestion (ISO format)
 
+    Args:
+        limit: Maximum number of documents to return (None for all)
+        offset: Number of documents to skip (for pagination)
+
     Returns:
         List of document dictionaries sorted by ingested_at (newest first)
     """
@@ -294,6 +407,8 @@ def list_documents() -> list[dict]:
     collection = client.get_collection(settings.chroma_collection_name)
 
     # Get all items from collection
+    # Note: ChromaDB doesn't support pagination in get(), so we fetch all and paginate in memory
+    # For very large collections (10k+ docs), consider using HTTP mode with a remote server
     results = collection.get()
 
     if not results['ids']:
@@ -325,6 +440,12 @@ def list_documents() -> list[dict]:
         key=lambda x: x['ingested_at'] if x['ingested_at'] != 'unknown' else '',
         reverse=True
     )
+
+    # Apply pagination
+    if offset > 0:
+        documents = documents[offset:]
+    if limit is not None and limit > 0:
+        documents = documents[:limit]
 
     return documents
 

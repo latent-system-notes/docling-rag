@@ -31,7 +31,20 @@ class DocumentMetadata(BaseModel):
     language: str
     file_path: str
     num_chunks: int
+    num_pages: int | None = None
     ingested_at: datetime = Field(default_factory=datetime.now)
+
+
+class IngestionCheckpoint(BaseModel):
+    """Checkpoint for resumable ingestion."""
+    doc_id: str
+    file_path: str
+    file_hash: str
+    total_chunks: int
+    processed_batches: list[int] = Field(default_factory=list)
+    last_batch: int = -1
+    timestamp: datetime = Field(default_factory=datetime.now)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SearchResult(BaseModel):

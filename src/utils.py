@@ -1,6 +1,7 @@
 """Utility functions for language detection, embeddings, and model downloading."""
-from functools import cache
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from langdetect import LangDetectException, detect
@@ -9,6 +10,9 @@ from .config import settings, get_logger
 from .models import EmbeddingError
 
 logger = get_logger(__name__)
+
+# Manual cache for embedding model to allow cleanup
+_embedder_cache: Optional[any] = None
 
 
 # ============================================================================
@@ -40,16 +44,23 @@ def detect_language(text: str) -> str:
 # ============================================================================
 
 
-@cache
 def get_embedder():
     """Load the embedding model (cached for reuse).
 
     Embeddings convert text into numbers (vectors) that capture semantic meaning.
     Similar texts have similar vectors, enabling semantic search.
 
+    Uses manual caching to allow proper resource cleanup.
+
     Returns:
         Loaded SentenceTransformer model
     """
+    global _embedder_cache
+
+    # Return cached model if available
+    if _embedder_cache is not None:
+        return _embedder_cache
+
     from sentence_transformers import SentenceTransformer
 
     local_path = get_model_paths()["embedding"]
@@ -61,7 +72,32 @@ def get_embedder():
         )
 
     logger.info(f"Loading embedding model from {local_path}")
-    return SentenceTransformer(str(local_path), device=settings.device)
+    model = SentenceTransformer(str(local_path), device=settings.device)
+    _embedder_cache = model
+    return model
+
+
+def cleanup_embedder() -> None:
+    """Cleanup and release the cached embedding model.
+
+    Call this to free ~420MB+ of memory when the model is no longer needed.
+    Useful for batch processing or after ingesting large document sets.
+    """
+    global _embedder_cache
+
+    if _embedder_cache is not None:
+        # Clear model from memory
+        try:
+            # Move model tensors to CPU if on GPU (though we use CPU-only mode)
+            if hasattr(_embedder_cache, 'to'):
+                _embedder_cache.to('cpu')
+            # Delete the model
+            del _embedder_cache
+        except Exception as e:
+            logger.warning(f"Error during embedder cleanup: {e}")
+        finally:
+            _embedder_cache = None
+            logger.info("Embedding model cache cleared (freed ~420MB)")
 
 
 def embed(texts: str | list[str], show_progress: bool = False) -> np.ndarray:
@@ -189,7 +225,8 @@ def should_exclude_file(file_path: Path) -> bool:
 def discover_files(
     root_path: Path,
     recursive: bool = True,
-    include_extensions: set[str] | None = None
+    include_extensions: set[str] | None = None,
+    limit: int | None = None
 ) -> list[Path]:
     """Discover files in directory with filtering.
 
@@ -200,6 +237,7 @@ def discover_files(
         root_path: Directory to scan
         recursive: Scan subdirectories (default: True)
         include_extensions: Override default supported extensions
+        limit: Maximum number of files to return (None for all)
 
     Returns:
         List of valid file paths to ingest, sorted by path
@@ -208,6 +246,7 @@ def discover_files(
         >>> files = discover_files(Path("./documents"))
         >>> files = discover_files(Path("./docs"), recursive=False)
         >>> files = discover_files(Path("./data"), include_extensions={'.pdf', '.md'})
+        >>> files = discover_files(Path("./huge_dir"), limit=100)
     """
     extensions = include_extensions or SUPPORTED_EXTENSIONS
 
@@ -223,7 +262,14 @@ def discover_files(
         and not should_exclude_file(f)
     ]
 
-    return sorted(valid_files)  # Sort for consistent ordering
+    # Sort for consistent ordering
+    valid_files = sorted(valid_files)
+
+    # Apply limit if specified
+    if limit is not None and limit > 0:
+        valid_files = valid_files[:limit]
+
+    return valid_files
 
 
 # ============================================================================
@@ -264,3 +310,56 @@ def is_file_modified(file_path: Path, ingested_at_iso: str) -> bool:
     except Exception as e:
         logger.warning(f"Error checking modification time for {file_path}: {e}")
         return False
+
+
+# ============================================================================
+# Global Cleanup
+# ============================================================================
+
+
+@contextmanager
+def managed_resources():
+    """Context manager for automatic resource cleanup.
+
+    Automatically cleans up cached resources when exiting the context.
+    Useful for batch operations or CLI commands.
+
+    Example:
+        >>> with managed_resources():
+        ...     ingest_document("paper.pdf")
+        ...     query("What is this about?")
+        ... # Resources automatically cleaned up here
+    """
+    try:
+        yield
+    finally:
+        cleanup_all_resources()
+
+
+def cleanup_all_resources() -> None:
+    """Cleanup all cached resources (embedding model, ChromaDB client, BM25 index).
+
+    Use this to free memory after batch operations or in long-running processes.
+    Frees approximately 420MB+ from embedding model plus database connections.
+    """
+    import gc
+
+    # Clean up embedding model
+    cleanup_embedder()
+
+    # Clean up ChromaDB client
+    from .storage.chroma_client import cleanup_chroma_client
+    cleanup_chroma_client()
+
+    # Clear BM25 index from memory (but don't delete the saved file)
+    from .storage.bm25_index import get_bm25_index
+    bm25_index = get_bm25_index()
+    if bm25_index.index is not None:
+        bm25_index.index = None
+        bm25_index.documents = []
+        bm25_index.doc_ids = []
+        logger.info("BM25 index cleared from memory")
+
+    # Force garbage collection to free memory
+    gc.collect()
+    logger.info("All resources cleaned up and garbage collected")
