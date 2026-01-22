@@ -35,7 +35,7 @@ class BM25Index:
         self.index = None
         self.doc_ids = []
         self.documents = []  # Store original documents for incremental updates
-        self.index_path = Path(settings.chroma_persist_dir) / "bm25_index.pkl"
+        self.index_path = settings.chroma_persist_dir / "bm25_index.pkl"
         self.is_dirty = False  # Track if index needs rebuild
         self.max_docs_in_memory = max_docs_in_memory
         self._is_loaded = False  # Track if index is loaded in memory

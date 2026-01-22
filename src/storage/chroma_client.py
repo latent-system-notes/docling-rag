@@ -63,11 +63,10 @@ def get_chroma_client() -> chromadb.ClientAPI:
         logger.info(f"Connecting to ChromaDB at {settings.chroma_persist_dir}")
 
         try:
-            persist_dir = Path(settings.chroma_persist_dir)
-            persist_dir.mkdir(parents=True, exist_ok=True)
+            settings.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
 
             client = chromadb.PersistentClient(
-                path=str(persist_dir),
+                path=str(settings.chroma_persist_dir),
                 settings=ChromaSettings(anonymized_telemetry=False),
             )
             _chroma_client_cache = client

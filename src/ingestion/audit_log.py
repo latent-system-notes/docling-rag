@@ -25,7 +25,7 @@ CSV_HEADERS = [
 
 def get_audit_log_path() -> Path:
     """Get path to ingestion audit log CSV."""
-    log_dir = Path(settings.chroma_persist_dir).parent / "logs"
+    log_dir = settings.chroma_persist_dir.parent / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / "ingestion_summary.csv"
 

@@ -117,7 +117,7 @@ class Settings(BaseSettings):
 
     models_dir: Path = Path("./models")
 
-    chroma_persist_dir: str = "./data/chroma"
+    chroma_persist_dir: Path = Path("./data/chroma")
     chroma_collection_name: str = "documents"
 
     # Checkpoint directory for resumable ingestion
