@@ -11,13 +11,13 @@ from typing import BinaryIO
 
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, LayoutModelConfig
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import DoclingDocument
 
 from ..config import settings, get_logger, enforce_logging_format
 from ..models import DocumentLoadError, DocumentMetadata
-from ..utils import detect_language
+from ..utils import detect_language, get_model_paths
 
 logger = get_logger(__name__)
 
@@ -44,9 +44,13 @@ def _get_ocr_options():
     engine = settings.ocr_engine.lower()
     langs = settings.ocr_languages.split("+") if settings.ocr_languages else []
 
+    logger.info(f"OCR CONFIG: Configuring OCR engine: {engine}")
+    logger.info(f"OCR CONFIG: OCR languages: {langs if langs else ['default']}")
+
     if engine == "auto":
         # Use OcrAutoOptions for automatic engine selection
         from docling.datamodel.pipeline_options import OcrAutoOptions
+        logger.info("OCR CONFIG: Using OcrAutoOptions (auto-select best engine)")
         return OcrAutoOptions(
             lang=langs if langs else ['en'],
             force_full_page_ocr=True,
@@ -56,6 +60,7 @@ def _get_ocr_options():
         # RapidOCR uses full language names (english, arabic, chinese, etc.)
         lang_map = {'eng': 'english', 'ara': 'arabic', 'chi': 'chinese', 'jpn': 'japanese'}
         rapidocr_langs = [lang_map.get(lang, lang) for lang in langs]
+        logger.info(f"OCR CONFIG: Using RapidOcrOptions with languages: {rapidocr_langs if rapidocr_langs else ['english']}")
         return RapidOcrOptions(
             lang=rapidocr_langs if rapidocr_langs else ['english'],
             force_full_page_ocr=True,
@@ -86,8 +91,9 @@ def _get_ocr_options():
         )
     else:
         # Default to auto if unknown engine specified
-        logger.warning(f"Unknown OCR engine '{engine}', falling back to 'auto'")
+        logger.warning(f"OCR CONFIG: Unknown OCR engine '{engine}', falling back to 'auto'")
         from docling.datamodel.pipeline_options import OcrAutoOptions
+        logger.info("OCR CONFIG: Using OcrAutoOptions (fallback)")
         return OcrAutoOptions(
             lang=langs if langs else ['en'],
             force_full_page_ocr=True,
@@ -124,6 +130,10 @@ def load_document(
         DocumentLoadError: If document cannot be loaded
     """
     try:
+        logger.info("=" * 60)
+        logger.info("DOCUMENT LOADING: Starting document processing")
+        logger.info("=" * 60)
+
         # Enforce our logging format on RapidOCR (it adds its own handlers)
         enforce_logging_format()
 
@@ -131,6 +141,9 @@ def load_document(
         page_count = None
         if isinstance(source, (str, Path)):
             source_path = Path(source)
+            logger.info(f"DOCUMENT LOADING: Source file: {source_path}")
+            logger.info(f"DOCUMENT LOADING: File type: {source_path.suffix}")
+
             if source_path.suffix.lower() == '.pdf':
                 try:
                     import pypdf
@@ -138,9 +151,10 @@ def load_document(
                         pdf_reader = pypdf.PdfReader(f)
                         page_count = len(pdf_reader.pages)
                     if page_count:
-                        logger.info(f"Processing PDF with {page_count} pages (OCR enabled: {settings.enable_ocr})")
-                except Exception:
+                        logger.info(f"DOCUMENT LOADING: PDF with {page_count} pages (OCR enabled: {settings.enable_ocr})")
+                except Exception as e:
                     # If page count detection fails, continue without it
+                    logger.warning(f"DOCUMENT LOADING: Could not detect page count: {e}")
                     pass
 
         # Force CPU-only processing (no GPU usage)
@@ -157,14 +171,104 @@ def load_document(
         pipeline_options.accelerator_options = accelerator_options
         pipeline_options.ocr_options = ocr_options
         pipeline_options.do_ocr = settings.enable_ocr
-        pipeline_options.enable_remote_services = False  # Enforce offline mode - no external services
 
-        # Docling will use the model from HuggingFace cache automatically
-        # The model is downloaded to HF_HOME/hub/models--docling-project--docling-layout-heron
-        # No need to configure model_path - Docling finds it in the cache
-        logger.info("Docling will use layout model from HuggingFace cache")
+        # CRITICAL: Disable remote services to enforce offline mode
+        pipeline_options.enable_remote_services = False
+        logger.info("OFFLINE MODE: Remote services disabled (enable_remote_services=False)")
+
+        # Configure local Docling model paths for offline mode
+        local_docling_path = get_model_paths()["docling_layout"]
+        logger.info(f"OFFLINE MODE: Docling base cache path: {local_docling_path}")
+
+        # Set HF_HOME environment variable to use local cache
+        # This ensures all HuggingFace model downloads use our local cache
+        import os
+        os.environ["HF_HOME"] = str(local_docling_path.parent)
+        logger.info(f"OFFLINE MODE: Set HF_HOME={os.environ['HF_HOME']}")
+        logger.info("OFFLINE MODE: All HuggingFace models will use local cache")
+
+        # ========================================================================
+        # 1. Configure Layout Model (docling-layout-heron)
+        # ========================================================================
+        # The HuggingFace cache stores models as: models/.cache/hub/models--docling-project--docling-layout-heron
+        # We need to point to the actual snapshot directory
+        layout_repo_path = local_docling_path / "models--docling-project--docling-layout-heron"
+        layout_snapshot_path = layout_repo_path / "snapshots"
+
+        logger.info(f"OFFLINE MODE: Checking for model at: {layout_repo_path}")
+        logger.info(f"OFFLINE MODE: Snapshot directory: {layout_snapshot_path}")
+
+        # Find the latest snapshot directory (should only be one)
+        if layout_snapshot_path.exists():
+            logger.info(f"OFFLINE MODE: Snapshot directory exists, scanning for snapshots...")
+            snapshots = list(layout_snapshot_path.iterdir())
+            logger.info(f"OFFLINE MODE: Found {len(snapshots)} snapshot(s)")
+
+            if snapshots:
+                layout_model_path = snapshots[0]  # Use the first (and likely only) snapshot
+                logger.info(f"OFFLINE MODE: Using snapshot: {layout_model_path.name}")
+                logger.info(f"OFFLINE MODE: Full model path: {layout_model_path}")
+
+                # Verify model files exist
+                model_files = list(layout_model_path.glob("*"))
+                logger.info(f"OFFLINE MODE: Model snapshot contains {len(model_files)} files")
+
+                # Configure the model specification with local path
+                pipeline_options.layout_options.model_spec = LayoutModelConfig(
+                    name="docling_layout_heron",
+                    repo_id="docling-project/docling-layout-heron",
+                    revision="main",
+                    model_path=str(layout_model_path),  # Use local snapshot path
+                    supported_devices=[AcceleratorDevice.CPU]
+                )
+                logger.info("OFFLINE MODE: Layout model configured with local path")
+            else:
+                logger.error("OFFLINE MODE: No snapshots found in snapshot directory!")
+                logger.error(f"OFFLINE MODE: Run 'rag models --download' to download required models")
+        else:
+            logger.error(f"OFFLINE MODE: Snapshot path does not exist: {layout_snapshot_path}")
+            logger.error(f"OFFLINE MODE: Model repo path exists: {layout_repo_path.exists()}")
+            if layout_repo_path.exists():
+                contents = list(layout_repo_path.iterdir())
+                logger.error(f"OFFLINE MODE: Model repo contains: {[p.name for p in contents]}")
+            logger.error(f"OFFLINE MODE: Run 'rag models --download' to download required models")
+
+        # ========================================================================
+        # 2. Configure Table Structure Model (docling-models)
+        # ========================================================================
+        table_repo_path = local_docling_path / "models--docling-project--docling-models"
+        table_snapshot_path = table_repo_path / "snapshots"
+
+        logger.info(f"OFFLINE MODE: Checking for table model at: {table_repo_path}")
+        logger.info(f"OFFLINE MODE: Table snapshot directory: {table_snapshot_path}")
+
+        if table_snapshot_path.exists():
+            logger.info(f"OFFLINE MODE: Table snapshot directory exists, scanning...")
+            table_snapshots = list(table_snapshot_path.iterdir())
+            logger.info(f"OFFLINE MODE: Found {len(table_snapshots)} table snapshot(s)")
+
+            if table_snapshots:
+                table_model_path = table_snapshots[0]
+                logger.info(f"OFFLINE MODE: Using table snapshot: {table_model_path.name}")
+                logger.info(f"OFFLINE MODE: Full table model path: {table_model_path}")
+
+                # Verify table model files exist
+                table_files = list(table_model_path.glob("*"))
+                logger.info(f"OFFLINE MODE: Table model snapshot contains {len(table_files)} files")
+                logger.info("OFFLINE MODE: Table model configured (will use HF_HOME cache)")
+            else:
+                logger.error("OFFLINE MODE: No table snapshots found!")
+                logger.error(f"OFFLINE MODE: Run 'rag models --download' to download required models")
+        else:
+            logger.error(f"OFFLINE MODE: Table snapshot path does not exist: {table_snapshot_path}")
+            logger.error(f"OFFLINE MODE: Run 'rag models --download' to download required models")
 
         # Configure document converter with OCR settings and CPU-only mode
+        logger.info("DOCUMENT LOADING: Creating DocumentConverter with offline pipeline")
+        logger.info(f"DOCUMENT LOADING: Pipeline options hash: {hash(str(pipeline_options))}")
+        logger.info(f"DOCUMENT LOADING: OCR enabled: {pipeline_options.do_ocr}")
+        logger.info(f"DOCUMENT LOADING: Remote services: {pipeline_options.enable_remote_services}")
+
         converter = DocumentConverter(
             allowed_formats=None,  # Accept all formats
             format_options={
@@ -173,22 +277,67 @@ def load_document(
                 ),
             },
         )
+        logger.info("DOCUMENT LOADING: DocumentConverter created successfully")
 
         # Show progress indication for OCR processing
         if settings.enable_ocr and page_count:
-            logger.info(f"Starting OCR processing (this may take several minutes for large documents)...")
+            logger.info(f"DOCUMENT LOADING: Starting OCR processing for {page_count} pages (this may take several minutes)...")
 
         # Convert the document
         # Note: Docling processes page-by-page internally, but doesn't expose progress callbacks
         # The processing time is roughly proportional to page count for OCR
-        result = converter.convert(source)
+        logger.info("DOCUMENT LOADING: Starting document conversion...")
+
+        try:
+            result = converter.convert(source)
+            logger.info("DOCUMENT LOADING: Document conversion completed successfully")
+        except Exception as conv_error:
+            logger.error(f"DOCUMENT LOADING: Conversion failed with error: {conv_error}")
+            logger.error(f"DOCUMENT LOADING: Error type: {type(conv_error).__name__}")
+            import traceback
+            logger.error(f"DOCUMENT LOADING: Traceback:\n{traceback.format_exc()}")
+            raise
 
         if page_count:
-            logger.info(f"Document processing complete ({page_count} pages processed)")
+            logger.info(f"DOCUMENT LOADING: Processing complete ({page_count} pages processed)")
+
+        logger.info("=" * 60)
+        logger.info("DOCUMENT LOADING: Document processing finished successfully")
+        logger.info("=" * 60)
 
         return result.document, page_count
 
     except Exception as e:
+        logger.error("=" * 60)
+        logger.error("DOCUMENT LOADING: FAILED")
+        logger.error("=" * 60)
+        logger.error(f"DOCUMENT LOADING: Error message: {e}")
+        logger.error(f"DOCUMENT LOADING: Error type: {type(e).__name__}")
+
+        # Check if it's a HuggingFace Hub error
+        error_str = str(e).lower()
+        if "hub" in error_str or "snapshot" in error_str or "revision" in error_str:
+            logger.error("DOCUMENT LOADING: This appears to be a HuggingFace Hub model loading error")
+            logger.error("DOCUMENT LOADING: Checking model availability...")
+
+            model_paths = get_model_paths()
+            docling_path = model_paths["docling_layout"]
+            logger.error(f"DOCUMENT LOADING: Expected model base path: {docling_path}")
+            logger.error(f"DOCUMENT LOADING: Path exists: {docling_path.exists()}")
+
+            if docling_path.exists():
+                try:
+                    contents = list(docling_path.rglob("*"))
+                    logger.error(f"DOCUMENT LOADING: Found {len(contents)} files/directories in model path")
+                except Exception as scan_error:
+                    logger.error(f"DOCUMENT LOADING: Could not scan directory: {scan_error}")
+
+            logger.error("DOCUMENT LOADING: SOLUTION: Run 'rag models --download' to ensure all models are downloaded")
+
+        import traceback
+        logger.error(f"DOCUMENT LOADING: Full traceback:\n{traceback.format_exc()}")
+        logger.error("=" * 60)
+
         raise DocumentLoadError(f"Failed to load document: {e}") from e
 
 

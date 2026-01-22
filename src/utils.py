@@ -172,10 +172,13 @@ def download_embedding_model() -> None:
 
 
 def download_docling_models() -> None:
-    """Download Docling layout models to local directory for offline use.
+    """Download Docling models to local directory for offline use.
 
-    Docling uses HuggingFace models for PDF layout detection. This function
-    downloads them to the HuggingFace cache directory so Docling can find them.
+    Docling requires two models for PDF processing:
+    1. Layout model (docling-layout-heron): Detects page structure
+    2. Table structure model (docling-models): Parses tables in PDFs
+
+    This function downloads both to the HuggingFace cache directory.
 
     Note: We use snapshot_download WITHOUT local_dir to let it use the standard
     HuggingFace cache structure that Docling expects.
@@ -184,6 +187,8 @@ def download_docling_models() -> None:
 
     # Download to HuggingFace cache (models/.cache/hub/...)
     # This is the standard location that Docling looks for models
+
+    # 1. Download layout model
     logger.info("Downloading Docling layout model: docling-project/docling-layout-heron")
     snapshot_download(
         repo_id="docling-project/docling-layout-heron",
@@ -192,6 +197,15 @@ def download_docling_models() -> None:
     )
     logger.info("Downloaded Docling layout model to HuggingFace cache")
 
+    # 2. Download table structure model
+    logger.info("Downloading Docling table structure model: docling-project/docling-models")
+    snapshot_download(
+        repo_id="docling-project/docling-models",
+        revision="v2.3.0",
+        # Don't specify local_dir - let it use HF cache at models/.cache/hub/
+    )
+    logger.info("Downloaded Docling table structure model to HuggingFace cache")
+
 
 def verify_models_exist() -> dict[str, bool]:
     """Check if all models exist locally"""
@@ -199,17 +213,25 @@ def verify_models_exist() -> dict[str, bool]:
 
     paths = get_model_paths()
 
-    # Check if Docling model exists in HF cache
+    # Check if Docling models exist in HF cache
     hf_cache = Path(os.environ.get("HF_HOME", "./models/.cache")) / "hub"
-    docling_exists = False
+
+    # Check layout model
+    docling_layout_exists = False
     if hf_cache.exists():
-        # Look for docling-layout-heron in cache
         docling_dirs = list(hf_cache.glob("models--docling-project--docling-layout-heron"))
-        docling_exists = len(docling_dirs) > 0
+        docling_layout_exists = len(docling_dirs) > 0
+
+    # Check table structure model
+    docling_table_exists = False
+    if hf_cache.exists():
+        table_dirs = list(hf_cache.glob("models--docling-project--docling-models"))
+        docling_table_exists = len(table_dirs) > 0
 
     return {
         "embedding": paths["embedding"].exists(),
-        "docling_layout": docling_exists
+        "docling_layout": docling_layout_exists,
+        "docling_table": docling_table_exists
     }
 
 

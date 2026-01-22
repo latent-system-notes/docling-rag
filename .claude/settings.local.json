@@ -47,7 +47,10 @@
       "Bash(uv pip list:*)",
       "Bash(rag query:*)",
       "Bash(rag remove:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(rag models:*)",
+      "Bash(HF_HUB_OFFLINE=1 rag ingest:*)",
+      "Bash(rag sync:*)"
     ]
   }
 }
