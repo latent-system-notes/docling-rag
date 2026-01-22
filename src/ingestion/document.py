@@ -157,6 +157,12 @@ def load_document(
         pipeline_options.accelerator_options = accelerator_options
         pipeline_options.ocr_options = ocr_options
         pipeline_options.do_ocr = settings.enable_ocr
+        pipeline_options.enable_remote_services = False  # Enforce offline mode - no external services
+
+        # Docling will use the model from HuggingFace cache automatically
+        # The model is downloaded to HF_HOME/hub/models--docling-project--docling-layout-heron
+        # No need to configure model_path - Docling finds it in the cache
+        logger.info("Docling will use layout model from HuggingFace cache")
 
         # Configure document converter with OCR settings and CPU-only mode
         converter = DocumentConverter(

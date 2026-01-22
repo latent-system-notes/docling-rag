@@ -3,9 +3,11 @@ from typing import Iterable
 
 from docling.chunking import HybridChunker
 from docling_core.types.doc import DoclingDocument
+from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
 from ..config import settings, get_logger
 from ..models import ChunkingError, Chunk
+from ..utils import get_model_paths
 
 logger = get_logger(__name__)
 
@@ -21,8 +23,34 @@ def chunk_document(
         max_tokens = max_tokens or settings.max_tokens
 
         if method == "hybrid":
+            # Load tokenizer from local path with offline mode enforced
+            from transformers import AutoTokenizer
+
+            local_model_path = get_model_paths()["embedding"]
+
+            if not local_model_path.exists():
+                raise ChunkingError(
+                    f"Tokenizer model not found at {local_model_path}. "
+                    "OFFLINE MODE: Cannot download models because HF_HUB_OFFLINE=1. "
+                    "Run 'rag models --download' first (requires internet connection)."
+                )
+
+            # Load tokenizer with strict offline mode
+            hf_tokenizer = AutoTokenizer.from_pretrained(
+                str(local_model_path),
+                local_files_only=True,  # Enforce offline mode
+                trust_remote_code=False  # Security
+            )
+
+            # Wrap in Docling's HuggingFaceTokenizer
+            tokenizer = HuggingFaceTokenizer(
+                tokenizer=hf_tokenizer,
+                max_tokens=max_tokens
+            )
+
+            # Create chunker with offline tokenizer
             chunker = HybridChunker(
-                tokenizer=settings.embedding_model,
+                tokenizer=tokenizer,
                 max_tokens=max_tokens,
             )
         else:

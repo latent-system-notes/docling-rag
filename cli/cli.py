@@ -414,7 +414,8 @@ def serve(mcp: bool = True):
     from src.mcp.server import run_server
 
     if mcp:
-        console.print("[green]Starting MCP server...")
+        console.print(f"[green]Starting MCP server on http://{settings.mcp_host}:{settings.mcp_port}")
+
         try:
             run_server()
         except KeyboardInterrupt:
@@ -443,12 +444,22 @@ def models(
 ):
     """Manage offline models"""
     if download:
-        console.print("[yellow]Downloading embedding model to ./models...")
-        from src.utils import download_embedding_model
+        console.print("[yellow]Downloading models to ./models...")
+        from src.utils import download_embedding_model, download_docling_models
 
+        # Download embedding model
+        console.print("\n[cyan]1. Downloading embedding model...")
         download_embedding_model()
-        console.print("[green]Embedding model downloaded successfully!")
+        console.print("[green]OK Embedding model downloaded")
+
+        # Download Docling layout models
+        console.print("\n[cyan]2. Downloading Docling layout models...")
+        download_docling_models()
+        console.print("[green]OK Docling layout models downloaded")
+
+        console.print(f"\n[green]All models downloaded successfully!")
         console.print(f"[green]Models saved to: {settings.models_dir}")
+        console.print("\n[bold]System is now ready for offline operation![/bold]")
 
     elif verify:
         from src.utils import verify_models_exist

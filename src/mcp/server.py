@@ -6,15 +6,18 @@ from fastmcp import FastMCP
 
 from ..config import settings, get_logger
 from ..query import query
-from ..storage.chroma_client import get_stats, list_documents
+from ..storage.chroma_client import list_documents
 from ..models import QueryResult
 from ..utils import cleanup_all_resources
 
 logger = get_logger(__name__)
-mcp = FastMCP(settings.mcp_server_name)
+mcp = FastMCP(
+    name=settings.mcp_server_name,
+    instructions=settings.mcp_instructions,
+)
 
 
-@mcp.tool()
+@mcp.tool(description=settings.mcp_tool_query_description)
 async def query_rag(
     query_text: str,
     top_k: int = 5,
@@ -23,13 +26,7 @@ async def query_rag(
     return query(query_text, top_k)
 
 
-@mcp.tool()
-async def get_statistics() -> dict:
-    """Get RAG system statistics"""
-    return get_stats()
-
-
-@mcp.tool()
+@mcp.tool(description=settings.mcp_tool_list_docs_description)
 async def list_all_documents(
     limit: int | None = None,
     offset: int = 0,
@@ -81,22 +78,29 @@ def _handle_signal(signum, frame):
 
 
 def run_server():
-    """Run the MCP server with proper resource cleanup on shutdown."""
+    """Run the MCP server with streamable-http transport and proper resource cleanup."""
     # Register cleanup handlers
-    atexit.register(_cleanup_on_shutdown)
-    signal.signal(signal.SIGINT, _handle_signal)
-    signal.signal(signal.SIGTERM, _handle_signal)
+    if settings.mcp_enable_cleanup:
+        atexit.register(_cleanup_on_shutdown)
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
 
-    logger.info("Starting MCP server with resource cleanup handlers registered")
+    logger.info(f"Starting MCP server (transport={settings.mcp_transport}, host={settings.mcp_host}, port={settings.mcp_port})")
 
     try:
-        mcp.run()
+        mcp.run(
+            transport=settings.mcp_transport,
+            host=settings.mcp_host,
+            port=settings.mcp_port,
+        )
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")
-        _cleanup_on_shutdown()
+        if settings.mcp_enable_cleanup:
+            _cleanup_on_shutdown()
     except Exception as e:
         logger.error(f"Server error: {e}")
-        _cleanup_on_shutdown()
+        if settings.mcp_enable_cleanup:
+            _cleanup_on_shutdown()
         raise
 
 

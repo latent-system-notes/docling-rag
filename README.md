@@ -132,7 +132,7 @@ No data migration needed! The ChromaDB server reads your existing SQLite databas
 
 ### Offline Model Setup
 
-This system runs completely offline after initial setup. Download the embedding model once:
+This system is **100% offline-capable** after initial setup. All operations work without internet access.
 
 ```bash
 # Download embedding model (one-time setup, ~420MB)
@@ -147,12 +147,37 @@ rag models --info
 
 **Model Storage (based on .env settings):**
 - Embedding: `./models/embedding/{model_name}/` (~420MB with default model)
+- Docling Layout: `./models/docling/layout/` (~500MB for PDF layout detection)
 
 **How it works:**
-1. Model identifier in `.env` (e.g., `RAG_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2`) is used to download from HuggingFace
-2. Model is saved locally to `./models/` directory
-3. The system extracts the model name from the identifier and loads from local path
-4. After download, all operations work without internet connection
+1. Models are downloaded from HuggingFace Hub:
+   - **Embedding model**: Specified in `.env` (default: `paraphrase-multilingual-mpnet-base-v2`)
+   - **Docling layout model**: Required for PDF processing (`docling-project/docling-layout-heron`)
+2. Models are saved locally to `./models/` directory
+3. All subsequent operations load models from local paths only
+4. After download, **zero internet connectivity required**
+
+**Offline Mode Enforcement:**
+The system enforces strict offline operation through code-level parameters (not environment variables):
+- **HuggingFace Embeddings**: `local_files_only=True` prevents any network access when loading models
+- **HuggingFace Tokenizers**: `local_files_only=True` prevents downloading tokenizer files
+- **Docling**: `enable_remote_services=False` prevents external service calls
+- **Docling Layout**: Uses `model_path` parameter to load from local directory
+- **Security**: `trust_remote_code=False` prevents downloading and executing remote code
+
+**Verify Offline Mode:**
+```bash
+# 1. Download models once (requires internet)
+rag models --download
+rag models --verify
+
+# 2. Test offline operation (disconnect internet or use airplane mode)
+rag sync document.pdf
+rag query "test query"
+
+# All operations should work without internet connection
+# If you see any network errors, please report them as a bug
+```
 
 ### CLI Usage
 
@@ -180,6 +205,49 @@ rag reset
 # Start MCP server
 rag serve --mcp
 ```
+
+## MCP Server
+
+The system includes an MCP (Model Context Protocol) server for integration with AI assistants using streamable-http transport.
+
+### Configuration
+
+```bash
+# In .env:
+RAG_MCP_TRANSPORT=streamable-http
+RAG_MCP_HOST=127.0.0.1
+RAG_MCP_PORT=8080
+
+# Start server:
+rag serve
+# Server runs on http://127.0.0.1:8080
+```
+
+### Available Tools
+
+1. **query_rag** - Query documents and retrieve relevant chunks
+   - Parameters: `query_text` (str), `top_k` (int, default=5)
+   - Returns: QueryResult with ranked chunks, scores, and metadata
+   - Use case: Retrieve context for answering questions
+
+2. **list_all_documents** - Browse indexed documents with pagination
+   - Parameters: `limit` (int, optional), `offset` (int, default=0)
+   - Returns: List of documents with metadata (file paths, types, languages, chunk counts, timestamps)
+   - Use case: Explore available documents
+
+### Environment Variables
+
+All MCP settings are configurable via environment variables:
+
+- `RAG_MCP_TRANSPORT` - Transport protocol (default: streamable-http)
+- `RAG_MCP_HOST` - Server host (default: 127.0.0.1)
+- `RAG_MCP_PORT` - Server port (default: 8080)
+- `RAG_MCP_INSTRUCTIONS` - Instructions shown to MCP clients
+- `RAG_MCP_TOOL_QUERY_DESCRIPTION` - Custom query tool description
+- `RAG_MCP_TOOL_LIST_DOCS_DESCRIPTION` - Custom list documents tool description
+- `RAG_MCP_ENABLE_CLEANUP` - Enable resource cleanup on shutdown (default: true)
+
+See `.env.example` for complete configuration options.
 
 ### Smart Syncing
 

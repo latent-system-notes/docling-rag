@@ -84,6 +84,19 @@ def enforce_logging_format():
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"  # Disable MPS (Apple Silicon GPU)
 
+# ============================================================================
+# Force Offline Mode for HuggingFace
+# ============================================================================
+
+# NOTE: Offline mode is NOT set here globally because it would prevent downloads.
+# Instead, we enforce offline mode via `local_files_only=True` parameter
+# when loading models in utils.py and other modules.
+
+# Set cache directory to local models folder
+# This ensures any caching operations use our local directory
+if "HF_HOME" not in os.environ:
+    os.environ["HF_HOME"] = str(Path("./models/.cache").absolute())
+
 # OCR engine is configured via settings.ocr_engine (defaults to "auto")
 
 # Import torch after setting environment variables
@@ -133,7 +146,60 @@ class Settings(BaseSettings):
 
     default_top_k: int = 5
 
+    # MCP Server Configuration
     mcp_server_name: str = "docling-rag"
+    mcp_transport: str = "streamable-http"
+    mcp_host: str = "0.0.0.0"
+    mcp_port: int = 8080
+    mcp_instructions: str = "You are a RAG (Retrieval-Augmented Generation) assistant with access to indexed documents. Use query_rag to retrieve relevant context and list_all_documents to browse available documents."
+    mcp_enable_cleanup: bool = True
+
+    # MCP Tool Descriptions
+    mcp_tool_query_description: str = """Query the RAG system to retrieve relevant document chunks based on semantic similarity.
+
+Args:
+    query_text (str): The search query or question to find relevant context for
+    top_k (int, optional): Number of top results to return. Defaults to 5.
+
+Returns:
+    QueryResult containing:
+    - query: The original query text
+    - context: List of SearchResult objects with:
+        - chunk: Document chunk (text, page_num, doc_id, metadata)
+        - score: Relevance score (0-1, higher is better)
+        - distance: Vector distance (lower is better)
+
+Use this to retrieve context chunks that can be used to answer questions or provide relevant information from indexed documents.
+
+Examples:
+    query_rag("What is machine learning?", top_k=3)
+    query_rag("Safety procedures for evacuation", top_k=10)"""
+
+    mcp_tool_list_docs_description: str = """List all indexed documents with metadata and pagination support.
+
+Returns document information including file paths, types, languages, chunk counts, and ingestion timestamps.
+
+Args:
+    limit (int, optional): Maximum number of documents to return. None returns all.
+    offset (int, optional): Number of documents to skip for pagination. Defaults to 0.
+
+Returns:
+    Dictionary containing:
+    - total: Total number of documents in the system
+    - showing: Number of documents in this response
+    - offset: Current pagination offset
+    - documents: List of document objects with:
+        - doc_id: Unique document identifier
+        - file_path: Path to original file
+        - doc_type: File extension (pdf, docx, etc.)
+        - language: Detected language
+        - num_chunks: Number of chunks created
+        - ingested_at: Timestamp when ingested
+
+Examples:
+    list_all_documents()              # Get all documents
+    list_all_documents(limit=20)      # Get first 20
+    list_all_documents(limit=20, offset=20)  # Get next 20 (page 2)"""
 
     language_detection_enabled: bool = True
 

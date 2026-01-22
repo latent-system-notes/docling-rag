@@ -1,4 +1,5 @@
 """Utility functions for language detection, embeddings, and model downloading."""
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
@@ -68,11 +69,17 @@ def get_embedder():
     if not local_path.exists():
         raise EmbeddingError(
             f"Embedding model not found at {local_path}. "
-            "Run 'rag models --download' first."
+            "OFFLINE MODE: Cannot download models because HF_HUB_OFFLINE=1. "
+            "Run 'rag models --download' first (requires internet connection)."
         )
 
     logger.info(f"Loading embedding model from {local_path}")
-    model = SentenceTransformer(str(local_path), device=settings.device)
+    model = SentenceTransformer(
+        str(local_path),
+        device=settings.device,
+        local_files_only=True,  # Enforce offline mode - prevents any network access
+        trust_remote_code=False  # Security: prevents downloading remote code
+    )
     _embedder_cache = model
     return model
 
@@ -142,13 +149,17 @@ def embed(texts: str | list[str], show_progress: bool = False) -> np.ndarray:
 
 
 def get_model_paths() -> dict[str, Path]:
-    """Return local path for embedding model."""
+    """Return local paths for all models (embedding and docling layout)."""
     embedding_name = settings.embedding_model.split("/")[-1]
-    return {"embedding": settings.models_dir / "embedding" / embedding_name}
+    return {
+        "embedding": settings.models_dir / "embedding" / embedding_name,
+        # Docling models are in HuggingFace cache
+        "docling_layout": Path(os.environ.get("HF_HOME", "./models/.cache")) / "hub"
+    }
 
 
 def download_embedding_model() -> None:
-    """Download embedding model to local directory"""
+    """Download embedding model to local directory."""
     from sentence_transformers import SentenceTransformer
 
     path = get_model_paths()["embedding"]
@@ -160,9 +171,46 @@ def download_embedding_model() -> None:
     logger.info(f"Downloaded embedding model to {path}")
 
 
+def download_docling_models() -> None:
+    """Download Docling layout models to local directory for offline use.
+
+    Docling uses HuggingFace models for PDF layout detection. This function
+    downloads them to the HuggingFace cache directory so Docling can find them.
+
+    Note: We use snapshot_download WITHOUT local_dir to let it use the standard
+    HuggingFace cache structure that Docling expects.
+    """
+    from huggingface_hub import snapshot_download
+
+    # Download to HuggingFace cache (models/.cache/hub/...)
+    # This is the standard location that Docling looks for models
+    logger.info("Downloading Docling layout model: docling-project/docling-layout-heron")
+    snapshot_download(
+        repo_id="docling-project/docling-layout-heron",
+        revision="main",
+        # Don't specify local_dir - let it use HF cache at models/.cache/hub/
+    )
+    logger.info("Downloaded Docling layout model to HuggingFace cache")
+
+
 def verify_models_exist() -> dict[str, bool]:
-    """Check if embedding model exists locally"""
-    return {"embedding": get_model_paths()["embedding"].exists()}
+    """Check if all models exist locally"""
+    import os
+
+    paths = get_model_paths()
+
+    # Check if Docling model exists in HF cache
+    hf_cache = Path(os.environ.get("HF_HOME", "./models/.cache")) / "hub"
+    docling_exists = False
+    if hf_cache.exists():
+        # Look for docling-layout-heron in cache
+        docling_dirs = list(hf_cache.glob("models--docling-project--docling-layout-heron"))
+        docling_exists = len(docling_dirs) > 0
+
+    return {
+        "embedding": paths["embedding"].exists(),
+        "docling_layout": docling_exists
+    }
 
 
 # ============================================================================
