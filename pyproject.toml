@@ -53,6 +53,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "rank-bm25>=0.2.2",
     "pypdf>=4.0",
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

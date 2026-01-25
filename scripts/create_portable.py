@@ -59,8 +59,11 @@ def download_embedded_python():
         content = pth_file.read_text()
         # Uncomment import site
         content = content.replace("#import site", "import site")
-        # Add Lib folder
+        # Add Lib folder and pywin32 paths
         content += "\n../Lib\n../Lib/site-packages\n"
+        content += "../Lib/site-packages/win32\n"
+        content += "../Lib/site-packages/win32/lib\n"
+        content += "../Lib/site-packages/Pythonwin\n"
         pth_file.write_text(content)
         print(f"  Modified: {pth_file.name}")
 
@@ -122,6 +125,15 @@ def install_dependencies(pip_exe):
             str(ROOT_DIR)
         ], check=True)
 
+    # Copy pywin32 DLLs to Python directory for proper loading
+    python_dir = PORTABLE_DIR / "python"
+    pywin32_dlls = lib_dir / "pywin32_system32"
+    if pywin32_dlls.exists():
+        print("  Copying pywin32 DLLs...")
+        for dll in pywin32_dlls.glob("*.dll"):
+            shutil.copy(dll, python_dir / dll.name)
+            print(f"    Copied: {dll.name}")
+
 
 def download_models():
     """Download models for offline use."""
@@ -174,9 +186,9 @@ set "PYTHON_DIR=%SCRIPT_DIR%python"
 set "LIB_DIR=%SCRIPT_DIR%Lib\\site-packages"
 set "MODELS_DIR=%SCRIPT_DIR%models"
 
-REM Set Python paths
-set "PATH=%PYTHON_DIR%;%PYTHON_DIR%\\Scripts;%PATH%"
-set "PYTHONPATH=%LIB_DIR%;%PYTHONPATH%"
+REM Set Python paths (include pywin32 DLL path)
+set "PATH=%PYTHON_DIR%;%PYTHON_DIR%\\Scripts;%LIB_DIR%\\pywin32_system32;%PATH%"
+set "PYTHONPATH=%LIB_DIR%;%LIB_DIR%\\win32;%LIB_DIR%\\win32\\lib;%LIB_DIR%\\Pythonwin;%PYTHONPATH%"
 
 REM Set offline mode and model paths
 set "HF_HOME=%MODELS_DIR%\\.cache"

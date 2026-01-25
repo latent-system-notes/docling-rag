@@ -100,7 +100,20 @@
       "Bash(cmd /c \".venv\\\\Scripts\\\\python.exe -c \"\"import sys; sys.path.insert\\(0,''.''\\); from cli.cli import app; print\\(''CLI module loads OK''\\)\"\"\")",
       "Bash(cmd /c \".venv\\\\Scripts\\\\rag.exe project list 2>&1\")",
       "Bash(cmd /c \".venv\\\\Scripts\\\\rag.exe project list > test_output.txt 2>&1\")",
-      "Bash(.venv/Scripts/python:*)"
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" --help)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" project list)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" config device)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" project create test-portable --port 9099 --description \"Test portable build\")",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" ingestion start --workers 2)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" mcp serve)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\python\\\\Scripts\\\\pip.exe\" install:*)",
+      "Bash(copy \"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\Lib\\\\site-packages\\\\pywin32_system32\\\\*.dll\" \"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\python\"\")",
+      "Bash(copy /Y C:UsersarifPycharmProjectsdocling-ragdistdocling-rag-portableLibsite-packagespywin32_system32pythoncom312.dll C:UsersarifPycharmProjectsdocling-ragdistdocling-rag-portablepython)",
+      "Bash(cmd /c:*)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\python\\\\python.exe\" -c:*)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" mcp status)",
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" mcp stop)"
     ]
   }
 }
