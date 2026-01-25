@@ -23,7 +23,7 @@ description = "Production-ready RAG system with Docling and ChromaDB"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Arif", email = "arif@example.com"}
+    {name = "latent-system-notes", email = "latent.system.notes@gmail.com"}
 ]
 keywords = ["rag", "docling", "chromadb", "mcp", "document-processing", "ai"]
 classifiers = [
@@ -72,10 +72,10 @@ build = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/docling-rag"
-Documentation = "https://github.com/yourusername/docling-rag#readme"
-Repository = "https://github.com/yourusername/docling-rag"
-Issues = "https://github.com/yourusername/docling-rag/issues"
+Homepage = "https://github.com/latent-system-notes/docling-rag"
+Documentation = "https://github.com/latent-system-notes/docling-rag#readme"
+Repository = "https://github.com/latent-system-notes/docling-rag"
+Issues = "https://github.com/latent-system-notes/docling-rag/issues"
 
 [project.scripts]
 rag = "cli.cli:app"
