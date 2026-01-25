@@ -1,4 +1,16 @@
 from pathlib import Path
+import sys
+import os
+
+# Fix Windows console encoding for Arabic/Unicode characters
+if sys.platform == "win32":
+    # Set UTF-8 mode for Python I/O
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    # Set console code page to UTF-8
+    os.system('chcp 65001 > nul 2>&1')
 
 import typer
 from rich.console import Console
@@ -12,7 +24,8 @@ from src.utils import discover_files, is_file_modified
 logger = get_logger(__name__)
 
 app = typer.Typer()
-console = Console()
+# Force UTF-8 output for Rich console (better Unicode support)
+console = Console(force_terminal=True, legacy_windows=False)
 
 
 @app.command()
@@ -164,6 +177,69 @@ def remove(
         raise typer.Exit(1)
 
 
+def _ingest_parallel(directory: Path, recursive: bool, dry_run: bool, force: bool, resume: bool, workers: int):
+    """Handle parallel ingestion with Rich progress display."""
+    from src.ingestion.parallel_pipeline import (
+        parallel_ingest_documents,
+        ParallelIngestionConfig,
+        collect_files
+    )
+
+    console.print(f"[cyan]Parallel ingestion mode: {workers} workers[/cyan]")
+    console.print(f"[cyan]Scanning {directory}...[/cyan]")
+
+    # Collect files first for dry-run support
+    config = ParallelIngestionConfig(
+        num_workers=workers,
+        recursive=recursive,
+        force=force,
+        resume=resume
+    )
+
+    files = collect_files(directory, config.extensions, recursive)
+
+    if not files:
+        console.print(f"[yellow]No supported files found in {directory}")
+        return
+
+    console.print(f"[cyan]Found {len(files)} documents[/cyan]")
+
+    if dry_run:
+        console.print("\n[yellow]Dry run - no changes will be made[/yellow]")
+        console.print("\n[bold]Would process with parallel ingestion:[/bold]")
+        for f in files[:20]:  # Show first 20
+            # Sanitize filename for console output (handle non-ASCII characters)
+            safe_name = f.name.encode('ascii', 'replace').decode('ascii')
+            console.print(f"  + {safe_name}")
+        if len(files) > 20:
+            console.print(f"  ... and {len(files) - 20} more files")
+        return
+
+    # Run parallel ingestion
+    console.print("")
+    result = parallel_ingest_documents(directory, config)
+
+    # Display results
+    console.print(f"\n[bold]Parallel Ingestion Complete:[/bold]")
+    console.print(f"  [green]Processed:[/green] {result.processed} files")
+    if result.resumed > 0:
+        console.print(f"    - New: {result.processed - result.resumed}")
+        console.print(f"    - Resumed: {result.resumed}")
+    if result.skipped > 0:
+        console.print(f"  [dim]Skipped:[/dim] {result.skipped} files (already completed)")
+    if result.failed > 0:
+        console.print(f"  [red]Failed:[/red] {result.failed} files")
+    console.print(f"  [cyan]Total chunks:[/cyan] {result.total_chunks}")
+    console.print(f"  [dim]Duration:[/dim] {result.duration_seconds/60:.1f} minutes")
+
+    if result.errors:
+        console.print(f"\n[red]Errors:[/red]")
+        for err in result.errors[:5]:  # Show first 5 errors
+            console.print(f"  - {Path(err['file']).name}: {err['error'][:50]}")
+        if len(result.errors) > 5:
+            console.print(f"  ... and {len(result.errors) - 5} more errors")
+
+
 @app.command()
 def ingest(
     path: str,
@@ -171,19 +247,24 @@ def ingest(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be updated without doing it"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-ingest even if already exists"),
     resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from checkpoint if exists (default: enabled)"),
+    workers: int = typer.Option(4, "--workers", "-w", help="Number of parallel workers (default: 4)"),
 ):
-    """Ingest file(s) or folder by ingesting new/modified files and removing deleted ones.
+    """Ingest file(s) or folder using parallel processing.
 
-    For single files: Just ingests the file
-    For folders: Automatically detects changes and syncs
-    - New files (not in index)
-    - Modified files (changed since ingestion)
-    - Deleted files (in index but not on disk)
+    For single files: Ingests the file directly
+    For folders: Uses parallel workers for fast ingestion
+    - Automatically skips already indexed files
+    - Supports checkpoint-based resume for interrupted ingestion
+
+    Uses multiple worker processes for CPU-intensive parsing,
+    with a single writer thread for database operations.
 
     Examples:
         rag ingest paper.pdf                # Ingest single file
-        rag ingest ./documents              # Ingest folder
-        rag ingest ./docs --dry-run         # Preview changes
+        rag ingest ./documents              # Ingest folder (4 workers)
+        rag ingest ./docs --workers 8       # Use 8 workers
+        rag ingest ./docs -w 2              # Use 2 workers
+        rag ingest ./docs --dry-run         # Preview what would be ingested
         rag ingest ./docs --no-recursive    # Ingest without subdirs
         rag ingest ./docs --force           # Force re-ingest all
     """
@@ -208,115 +289,12 @@ def ingest(
             raise typer.Exit(1)
         return
 
-    # Handle folder
+    # Handle folder - always use parallel ingestion
     if not file_path.is_dir():
         console.print(f"[red]Error: {path} is not a file or directory")
         raise typer.Exit(1)
 
-    console.print(f"[cyan]Analyzing {file_path}...")
-
-    # Get all current documents from DB
-    indexed_docs = list_documents()
-    indexed_paths = {Path(doc['file_path']): doc for doc in indexed_docs}
-
-    # Discover files on disk
-    disk_files = set(discover_files(file_path, recursive=recursive))
-
-    if not disk_files:
-        console.print(f"[yellow]No supported files found in {file_path}")
-        return
-
-    # If --force, treat all files as needing re-ingestion
-    if force:
-        new_files = []
-        modified_files = list(disk_files)  # Re-ingest everything
-        deleted_files = []
-    else:
-        # Find new files (on disk but not in DB)
-        new_files = [f for f in disk_files if f not in indexed_paths]
-
-        # Find modified files (on disk, in DB, but modified)
-        modified_files = []
-        for f in disk_files:
-            if f in indexed_paths:
-                doc = indexed_paths[f]
-                if is_file_modified(f, doc['ingested_at']):
-                    modified_files.append(f)
-
-        # Find deleted files (in DB but not on disk)
-        deleted_files = [p for p in indexed_paths.keys() if p not in disk_files]
-
-    # Summary
-    console.print(f"\n[bold]Ingestion Analysis:[/bold]")
-    console.print(f"  [green]New files:[/green] {len(new_files)}")
-    console.print(f"  [yellow]Modified files:[/yellow] {len(modified_files)}")
-    console.print(f"  [red]Deleted files:[/red] {len(deleted_files)}")
-
-    if not new_files and not modified_files and not deleted_files:
-        console.print(f"\n[green][OK] Everything is up to date!")
-        return
-
-    if dry_run:
-        console.print("\n[yellow]Dry run - no changes will be made[/yellow]")
-
-        if new_files:
-            console.print("\n[bold]Would ingest:[/bold]")
-            for f in new_files:
-                console.print(f"  + {f.name}")
-
-        if modified_files:
-            console.print("\n[bold]Would update:[/bold]")
-            for f in modified_files:
-                console.print(f"  ~ {f.name}")
-
-        if deleted_files:
-            console.print("\n[bold]Would remove:[/bold]")
-            for f in deleted_files:
-                console.print(f"  - {f.name}")
-
-        return
-
-    # Execute ingestion
-    console.print("\n[cyan]Ingesting...")
-
-    total_files = len(deleted_files) + len(modified_files) + len(new_files)
-    current = 0
-
-    # 1. Remove deleted files
-    for file_path in deleted_files:
-        current += 1
-        console.print(f"  [{current}/{total_files}] Removing {file_path.name}...")
-        num_removed = remove_document(file_path)
-        console.print(f"  [red][ERR][/red] Removed {file_path.name} ({num_removed} chunks)")
-
-    # 2. Re-ingest modified files (remove old version first)
-    for file_path in modified_files:
-        current += 1
-        console.print(f"  [{current}/{total_files}] Updating {file_path.name}...")
-        remove_document(file_path)  # Remove old version
-        try:
-            metadata = ingest_document(file_path, resume=resume)
-            console.print(f"  [yellow]↻[/yellow] Updated {file_path.name} ({metadata.num_chunks} chunks)")
-        except Exception as e:
-            logger.error(f"Failed to update {file_path}: {e}")
-            console.print(f"  [red][ERR][/red] Failed to update {file_path.name}: {str(e)}")
-
-    # 3. Ingest new files
-    for file_path in new_files:
-        current += 1
-        console.print(f"  [{current}/{total_files}] Processing {file_path.name}...")
-        try:
-            metadata = ingest_document(file_path, resume=resume)
-            console.print(f"  [green][OK][/green] Added {file_path.name} ({metadata.num_chunks} chunks)")
-        except Exception as e:
-            logger.error(f"Failed to ingest {file_path}: {e}")
-            console.print(f"  [red][ERR][/red] Failed to add {file_path.name}: {str(e)}")
-
-    # Final summary
-    console.print(f"\n[bold]Ingestion Complete:[/bold]")
-    console.print(f"  [green]Added:[/green] {len(new_files)} files")
-    console.print(f"  [yellow]Updated:[/yellow] {len(modified_files)} files")
-    console.print(f"  [red]Removed:[/red] {len(deleted_files)} files")
+    _ingest_parallel(file_path, recursive, dry_run, force, resume, workers)
 
 
 @app.command()
@@ -360,7 +338,7 @@ def query(
             }
             output["results"].append(chunk_data)
 
-        print(json.dumps(output, ensure_ascii=True, indent=2))
+        print(json.dumps(output, ensure_ascii=False, indent=2))
     else:
         # Text format (legacy)
         console.print(f"[bold]Query:[/bold] {result.query}\n")
@@ -444,7 +422,16 @@ def models(
 ):
     """Manage offline models"""
     if download:
+        import os
+
         console.print("[yellow]Downloading models to ./models...")
+        console.print("[dim]Temporarily disabling offline mode for download...[/dim]")
+
+        # Temporarily disable offline mode for downloading
+        os.environ.pop("HF_HUB_OFFLINE", None)
+        os.environ.pop("TRANSFORMERS_OFFLINE", None)
+        os.environ.pop("HF_DATASETS_OFFLINE", None)
+
         from src.utils import download_embedding_model, download_docling_models
 
         # Download embedding model
@@ -456,6 +443,11 @@ def models(
         console.print("\n[cyan]2. Downloading Docling layout models...")
         download_docling_models()
         console.print("[green]OK Docling layout models downloaded")
+
+        # Re-enable offline mode
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        os.environ["HF_DATASETS_OFFLINE"] = "1"
 
         console.print(f"\n[green]All models downloaded successfully!")
         console.print(f"[green]Models saved to: {settings.models_dir}")
@@ -511,6 +503,75 @@ def cleanup():
     console.print("[yellow]Cleaning up cached resources...")
     cleanup_all_resources()
     console.print("[green]Cleanup complete! Memory freed.")
+
+
+@app.command()
+def device():
+    """Show device (CPU/GPU) configuration and status.
+
+    Displays:
+    - Current device setting
+    - Available devices (CUDA, MPS, CPU)
+    - GPU information if available
+
+    To change device, set RAG_DEVICE environment variable:
+        RAG_DEVICE=cuda   - Use NVIDIA GPU
+        RAG_DEVICE=mps    - Use Apple Silicon GPU
+        RAG_DEVICE=cpu    - Use CPU (default)
+        RAG_DEVICE=auto   - Auto-detect best device
+    """
+    import torch
+
+    table = Table(title="Device Configuration", box=None)
+    table.add_column("Setting", style="cyan")
+    table.add_column("Value", style="green")
+
+    # Current setting
+    table.add_row("Current Device Setting", settings.device)
+
+    # Check CUDA availability
+    cuda_available = torch.cuda.is_available()
+    if cuda_available:
+        cuda_status = f"[green]Available[/green] ({torch.cuda.device_count()} GPU(s))"
+        for i in range(torch.cuda.device_count()):
+            gpu_name = torch.cuda.get_device_name(i)
+            gpu_mem = torch.cuda.get_device_properties(i).total_memory / (1024**3)
+            table.add_row(f"  GPU {i}", f"{gpu_name} ({gpu_mem:.1f} GB)")
+    else:
+        cuda_status = "[dim]Not available[/dim]"
+    table.add_row("CUDA (NVIDIA GPU)", cuda_status)
+
+    # Check MPS availability (Apple Silicon)
+    mps_available = torch.backends.mps.is_available() if hasattr(torch.backends, 'mps') else False
+    mps_status = "[green]Available[/green]" if mps_available else "[dim]Not available[/dim]"
+    table.add_row("MPS (Apple Silicon)", mps_status)
+
+    # CPU info
+    table.add_row("CPU", "[green]Available[/green]")
+
+    # Current torch default device
+    try:
+        current_device = str(torch.tensor([0]).device)
+    except Exception:
+        current_device = "cpu"
+    table.add_row("PyTorch Default Device", current_device)
+
+    console.print(table)
+
+    # Show recommendation
+    console.print("")
+    if settings.device == "cpu" and cuda_available:
+        console.print("[yellow]Tip:[/yellow] GPU available! Enable with: [bold]RAG_DEVICE=cuda[/bold]")
+        console.print("[dim]Add to .env file or set environment variable before running.[/dim]")
+    elif settings.device == "cpu" and mps_available:
+        console.print("[yellow]Tip:[/yellow] Apple GPU available! Enable with: [bold]RAG_DEVICE=mps[/bold]")
+
+    # Show how to install CUDA PyTorch if needed
+    if not cuda_available and settings.device == "cuda":
+        console.print("")
+        console.print("[red]CUDA requested but not available![/red]")
+        console.print("Install PyTorch with CUDA support:")
+        console.print("[dim]pip install torch --index-url https://download.pytorch.org/whl/cu121[/dim]")
 
 
 @app.command()
@@ -713,6 +774,258 @@ def ingestion_log(
     completed_count = sum(1 for r in rows if r['status'] in ['completed', 'resumed'])
 
     console.print(f"[dim]Total ingestions: {len(rows)} | Completed: {completed_count} | Failed: {failed_count}[/dim]")
+
+
+@app.command()
+def status(
+    live: bool = typer.Option(True, "--live/--once", help="Live updating display (default) or single snapshot"),
+    refresh: float = typer.Option(2.0, "--refresh", "-r", help="Refresh interval in seconds for live mode"),
+    history: bool = typer.Option(False, "--history", "-h", help="Show recent session history"),
+):
+    """Monitor running ingestion process.
+
+    Shows real-time status of parallel ingestion including:
+    - Session information (files, progress, rate)
+    - Per-worker status (current file, duration)
+    - Writer status
+
+    Examples:
+        rag status                    # Live dashboard (updates every 2s)
+        rag status --once             # Single snapshot
+        rag status --refresh 1        # Faster refresh rate
+        rag status --history          # Show recent session history
+    """
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.layout import Layout
+    from rich.text import Text
+    from src.ingestion.status import get_status_manager
+    import time
+
+    status_mgr = get_status_manager()
+
+    def format_duration(seconds: float) -> str:
+        """Format seconds into human-readable duration."""
+        if seconds is None:
+            return "-"
+        if seconds < 60:
+            return f"{seconds:.0f}s"
+        elif seconds < 3600:
+            return f"{seconds/60:.1f}m"
+        else:
+            return f"{seconds/3600:.1f}h"
+
+    def build_dashboard() -> Panel:
+        """Build the status dashboard."""
+        session = status_mgr.get_active_session()
+
+        if not session:
+            return Panel(
+                "[yellow]No active ingestion session[/yellow]\n\n"
+                "[dim]Run 'rag ingest <directory>' to start ingestion[/dim]",
+                title="RAG Ingestion Dashboard",
+                border_style="dim"
+            )
+
+        workers = status_mgr.get_workers(session.session_id)
+
+        # Build session info
+        elapsed = format_duration(session.elapsed_seconds)
+        eta = format_duration(session.eta_seconds) if session.eta_seconds else "calculating..."
+        progress_pct = (session.processed_files + session.failed_files) / max(session.total_files - session.skipped_files, 1) * 100
+
+        session_info = Table(box=None, show_header=False, padding=(0, 2))
+        session_info.add_column("Key", style="dim")
+        session_info.add_column("Value", style="bold")
+        session_info.add_row("Session ID", session.session_id)
+        session_info.add_row("Source", str(Path(session.source_path).name))
+        session_info.add_row("Elapsed", elapsed)
+        session_info.add_row("Progress", f"{session.processed_files}/{session.total_files - session.skipped_files} ({progress_pct:.0f}%)")
+        session_info.add_row("Rate", f"{session.rate:.2f} docs/sec")
+        session_info.add_row("ETA", eta)
+        session_info.add_row("Chunks", str(session.total_chunks))
+        if session.failed_files > 0:
+            session_info.add_row("Failed", f"[red]{session.failed_files}[/red]")
+        if session.skipped_files > 0:
+            session_info.add_row("Skipped", f"[dim]{session.skipped_files}[/dim]")
+
+        # Build workers table
+        workers_table = Table(box=box.SIMPLE, show_header=True, padding=(0, 1))
+        workers_table.add_column("Worker", style="cyan", width=10)
+        workers_table.add_column("Status", width=10)
+        workers_table.add_column("Current File", style="white", width=40)
+        workers_table.add_column("Duration", justify="right", width=10)
+        workers_table.add_column("Done", justify="right", width=6)
+
+        for w in workers:
+            # Format status with color
+            if w.status == "parsing":
+                status_text = "[green]parsing[/green]"
+            elif w.status == "writing":
+                status_text = "[blue]writing[/blue]"
+            elif w.status == "idle":
+                status_text = "[dim]idle[/dim]"
+            elif w.status == "stopped" or w.status == "finished":
+                status_text = "[dim]done[/dim]"
+            elif w.status == "error":
+                status_text = "[red]error[/red]"
+            else:
+                status_text = w.status
+
+            # Worker name
+            if w.worker_type == "writer":
+                worker_name = "Writer"
+            else:
+                worker_name = f"Worker-{w.worker_id}"
+
+            # Current file (truncate if too long)
+            current_file = w.current_file or "-"
+            if len(current_file) > 38:
+                current_file = current_file[:35] + "..."
+
+            # Duration on current file
+            duration = format_duration(w.file_duration_seconds)
+
+            workers_table.add_row(
+                worker_name,
+                status_text,
+                current_file,
+                duration,
+                str(w.files_processed)
+            )
+
+        # Combine into layout
+        content = Table.grid(padding=(1, 0))
+        content.add_row(session_info)
+        content.add_row("")
+        content.add_row(workers_table)
+
+        return Panel(
+            content,
+            title=f"[bold]RAG Ingestion Dashboard[/bold] - Session {session.session_id}",
+            subtitle=f"[dim]Last updated: {time.strftime('%H:%M:%S')}[/dim]",
+            border_style="green" if session.status == "running" else "dim"
+        )
+
+    def show_history():
+        """Show recent session history."""
+        sessions = status_mgr.get_recent_sessions(limit=10)
+
+        if not sessions:
+            console.print("[yellow]No session history found.[/yellow]")
+            return
+
+        table = Table(title="Recent Ingestion Sessions", box=box.SIMPLE)
+        table.add_column("Session", style="cyan", width=10)
+        table.add_column("Source", width=30)
+        table.add_column("Started", width=20)
+        table.add_column("Files", justify="right", width=8)
+        table.add_column("Chunks", justify="right", width=8)
+        table.add_column("Status", width=12)
+        table.add_column("Duration", justify="right", width=10)
+
+        for s in sessions:
+            # Format status
+            if s.status == "running":
+                status_text = "[green]running[/green]"
+            elif s.status == "completed":
+                status_text = "[blue]completed[/blue]"
+            elif s.status == "stopped":
+                status_text = "[yellow]stopped[/yellow]"
+            elif s.status == "stale":
+                status_text = "[dim]stale[/dim]"
+            else:
+                status_text = s.status
+
+            table.add_row(
+                s.session_id,
+                str(Path(s.source_path).name),
+                s.started_at.strftime("%Y-%m-%d %H:%M:%S"),
+                str(s.processed_files),
+                str(s.total_chunks),
+                status_text,
+                format_duration(s.elapsed_seconds)
+            )
+
+        console.print(table)
+
+    # Handle history mode
+    if history:
+        show_history()
+        return
+
+    # Single snapshot mode
+    if not live:
+        console.print(build_dashboard())
+        return
+
+    # Live mode
+    console.print("[dim]Press Ctrl+C to exit...[/dim]\n")
+
+    try:
+        with Live(build_dashboard(), refresh_per_second=1/refresh, console=console) as live_display:
+            while True:
+                time.sleep(refresh)
+                live_display.update(build_dashboard())
+
+                # Check if session is still running
+                session = status_mgr.get_active_session()
+                if not session:
+                    live_display.update(build_dashboard())
+                    break
+
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped monitoring.[/dim]")
+
+
+@app.command()
+def stop(
+    worker_id: int = typer.Option(None, "--worker", "-w", help="Stop specific worker by ID"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Stop running ingestion process.
+
+    Sends a graceful stop signal to workers. Workers will finish their
+    current file before stopping.
+
+    Examples:
+        rag stop                      # Stop all workers (with confirmation)
+        rag stop -y                   # Stop all workers (no confirmation)
+        rag stop --worker 2           # Stop only worker 2
+    """
+    from src.ingestion.status import get_status_manager
+
+    status_mgr = get_status_manager()
+
+    # Find active session
+    session = status_mgr.get_active_session()
+
+    if not session:
+        console.print("[yellow]No active ingestion session found.[/yellow]")
+        return
+
+    if worker_id is not None:
+        # Stop specific worker
+        if not yes:
+            if not typer.confirm(f"Stop worker {worker_id} in session {session.session_id}?"):
+                console.print("[yellow]Cancelled.[/yellow]")
+                return
+
+        status_mgr.send_stop_signal(session.session_id, worker_id)
+        console.print(f"[green]Stop signal sent to worker {worker_id}[/green]")
+        console.print("[dim]Worker will stop after completing current file.[/dim]")
+
+    else:
+        # Stop all workers
+        if not yes:
+            if not typer.confirm(f"Stop all workers in session {session.session_id}?"):
+                console.print("[yellow]Cancelled.[/yellow]")
+                return
+
+        status_mgr.send_stop_signal(session.session_id)
+        status_mgr.complete_session(session.session_id, "stopped")
+        console.print("[green]Stop signal sent to all workers[/green]")
+        console.print("[dim]Workers will stop after completing their current files.[/dim]")
 
 
 if __name__ == "__main__":

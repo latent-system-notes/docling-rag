@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 # ============================================================================
 
 ChunkingMethod = Literal["hybrid", "hierarchical"]
-Device = Literal["cpu", "cuda", "mps"]
+Device = Literal["cpu", "cuda", "mps", "auto"]
 
 
 # ============================================================================

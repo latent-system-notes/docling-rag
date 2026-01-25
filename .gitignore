@@ -43,4 +43,11 @@ models/
 # OS
 .DS_Store
 Thumbs.db
+nul
+
+# Lock files
+uv.lock
+
+# Data directories
 /chroma/
+/docs/

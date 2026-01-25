@@ -377,7 +377,8 @@ def document_exists(file_path: str | Path) -> bool:
 
     try:
         collection = client.get_collection(settings.chroma_collection_name)
-        results = collection.get(ids=[doc_id])
+        # Query by doc_id metadata field since chunk IDs have suffixes like _chunk_0
+        results = collection.get(where={"doc_id": doc_id}, limit=1)
         return len(results['ids']) > 0
     except Exception:
         # If collection doesn't exist or any error occurs, assume document doesn't exist

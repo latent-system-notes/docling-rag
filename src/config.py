@@ -41,7 +41,7 @@ for handler in _root_logger.handlers[:]:
 # Add our custom handler
 _handler = logging.StreamHandler()
 _formatter = UppercaseFormatter(
-    fmt="[%(levelname)s] [%(asctime)s] %(message)s",
+    fmt="[%(levelname)s] [%(asctime)s] [%(processName)s] %(message)s",
     datefmt="%d-%b %H:%M:%S"
 )
 _handler.setFormatter(_formatter)
@@ -76,37 +76,80 @@ def enforce_logging_format():
     rapidocr_logger.setLevel(logging.WARNING)
 
 # ============================================================================
-# Force CPU-only Mode for PyTorch
+# Device Configuration (CPU/GPU)
 # ============================================================================
 
-# Set environment variable to disable CUDA before any PyTorch import
-# This ensures all PyTorch operations use CPU only, even if GPU is available
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"  # Disable MPS (Apple Silicon GPU)
+# Check device setting from environment BEFORE importing PyTorch
+# RAG_DEVICE can be: cpu, cuda, mps (Apple Silicon), or auto
+_device_setting = os.environ.get("RAG_DEVICE", "cpu").lower()
+
+if _device_setting == "cpu":
+    # Force CPU-only mode - disable all GPU backends
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"
+elif _device_setting == "auto":
+    # Auto-detect: let PyTorch decide the best available device
+    # Don't set any environment variables, PyTorch will auto-detect
+    pass
+elif _device_setting == "cuda":
+    # NVIDIA GPU mode - ensure CUDA is not blocked
+    if "CUDA_VISIBLE_DEVICES" in os.environ and os.environ["CUDA_VISIBLE_DEVICES"] == "":
+        del os.environ["CUDA_VISIBLE_DEVICES"]
+elif _device_setting == "mps":
+    # Apple Silicon GPU mode
+    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 # ============================================================================
 # Force Offline Mode for HuggingFace
 # ============================================================================
 
-# NOTE: Offline mode is NOT set here globally because it would prevent downloads.
-# Instead, we enforce offline mode via `local_files_only=True` parameter
-# when loading models in utils.py and other modules.
-
-# Set cache directory to local models folder
+# Set cache directory to local models folder FIRST
 # This ensures any caching operations use our local directory
 if "HF_HOME" not in os.environ:
     os.environ["HF_HOME"] = str(Path("./models/.cache").absolute())
+
+# Check if offline mode should be enforced
+# Offline mode is enabled by default for security and airgapped deployments
+# Set RAG_OFFLINE_MODE=false or OFFLINE_MODE=false to disable
+_offline_mode = os.environ.get("RAG_OFFLINE_MODE", os.environ.get("OFFLINE_MODE", "true")).lower()
+if _offline_mode in ("true", "1", "yes"):
+    # Enforce offline mode - prevent any network access for model downloads
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
 
 # OCR engine is configured via settings.ocr_engine (defaults to "auto")
 
 # Import torch after setting environment variables
 try:
     import torch
-    # Explicitly set default device to CPU
-    torch.set_default_device("cpu")
-    # Disable cuDNN if available
-    if hasattr(torch.backends, 'cudnn'):
-        torch.backends.cudnn.enabled = False
+
+    if _device_setting == "cpu":
+        # Explicitly set default device to CPU
+        torch.set_default_device("cpu")
+        # Disable cuDNN if available
+        if hasattr(torch.backends, 'cudnn'):
+            torch.backends.cudnn.enabled = False
+    elif _device_setting == "cuda":
+        if torch.cuda.is_available():
+            torch.set_default_device("cuda")
+        else:
+            warnings.warn("CUDA requested but not available, falling back to CPU")
+            torch.set_default_device("cpu")
+    elif _device_setting == "mps":
+        if torch.backends.mps.is_available():
+            torch.set_default_device("mps")
+        else:
+            warnings.warn("MPS requested but not available, falling back to CPU")
+            torch.set_default_device("cpu")
+    elif _device_setting == "auto":
+        # Auto-detect best device
+        if torch.cuda.is_available():
+            torch.set_default_device("cuda")
+        elif torch.backends.mps.is_available():
+            torch.set_default_device("mps")
+        else:
+            torch.set_default_device("cpu")
 except ImportError:
     # torch might not be imported yet, will be set when it loads
     pass
@@ -143,6 +186,10 @@ class Settings(BaseSettings):
     enable_asr: bool = True
     ocr_languages: str = "eng+ara"
     ocr_engine: str = "auto"  # auto, rapidocr, easyocr, tesseract, ocrmac
+
+    # Offline mode - prevents any network access for model downloads
+    # Set to False only when running 'rag models --download'
+    offline_mode: bool = True
 
     default_top_k: int = 5
 

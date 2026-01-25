@@ -58,13 +58,16 @@ def search(
 
     # Load BM25 index
     bm25_index = get_bm25_index()
-    if not bm25_index.index:
-        logger.info("BM25 index not loaded, attempting to load...")
-        if not bm25_index.load():
+    bm25_ready = bm25_index.num_docs > 0
+    if not bm25_ready:
+        logger.info("BM25 index empty or not loaded, attempting to load...")
+        bm25_index.load()
+        bm25_ready = bm25_index.num_docs > 0
+        if not bm25_ready:
             logger.warning("BM25 index not available, falling back to vector-only search")
             use_hybrid = False
 
-    if use_hybrid and bm25_index.index:
+    if use_hybrid and bm25_ready:
         # Hybrid search: BM25 + Vector
         logger.info("Using hybrid search (BM25 + vector)")
 

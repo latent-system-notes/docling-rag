@@ -1,7 +1,7 @@
 @echo off
 REM Ingestion Script - Activate virtual environment and run document ingestion
 REM Usage: ingest.bat [optional_path]
-REM Example: ingest.bat "c:/documents"
+REM Example: ingest.bat "C:\my\documents"
 
 echo ========================================
 echo Document Ingestion Script
@@ -24,9 +24,9 @@ echo.
 
 REM Check if a path was provided as argument
 if "%~1"=="" (
-    REM No argument provided, use default
-    echo Running: rag ingest c:/docs
-    rag ingest c:/docs
+    REM No argument provided, use default docs folder
+    echo Running: rag ingest docs
+    rag ingest docs
 ) else (
     REM Use provided path
     echo Running: rag ingest "%~1"
