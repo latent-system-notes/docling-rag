@@ -11,6 +11,7 @@ logger = get_logger(__name__)
 
 CSV_HEADERS = [
     "timestamp",
+    "session_id",
     "file_name",
     "file_path",
     "doc_id",
@@ -31,7 +32,7 @@ def get_audit_log_path() -> Path:
 
 
 def initialize_audit_log():
-    """Create CSV file with headers if it doesn't exist."""
+    """Create CSV file with headers if it doesn't exist, or migrate if headers changed."""
     csv_path = get_audit_log_path()
 
     if not csv_path.exists():
@@ -39,6 +40,33 @@ def initialize_audit_log():
             writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
             writer.writeheader()
         logger.info(f"Created ingestion audit log: {csv_path}")
+    else:
+        # Check if existing file needs migration (missing session_id column)
+        try:
+            with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                existing_headers = next(reader, None)
+
+            if existing_headers and 'session_id' not in existing_headers:
+                # Migrate: read all data with old headers, write with new headers
+                logger.info("Migrating audit log to include session_id column...")
+                rows = []
+                with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        # Add empty session_id for old entries
+                        row['session_id'] = ''
+                        rows.append(row)
+
+                # Rewrite with new headers
+                with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
+                    writer.writeheader()
+                    for row in rows:
+                        writer.writerow(row)
+                logger.info(f"Migrated {len(rows)} entries to new format")
+        except Exception as e:
+            logger.warning(f"Could not check/migrate audit log: {e}")
 
 
 def log_ingestion(
@@ -50,7 +78,8 @@ def log_ingestion(
     num_chunks: int,
     status: str,
     start_time: datetime,
-    end_time: datetime
+    end_time: datetime,
+    session_id: Optional[str] = None
 ):
     """Append ingestion record to CSV.
 
@@ -64,6 +93,7 @@ def log_ingestion(
         status: "completed", "failed", or "resumed"
         start_time: When ingestion started
         end_time: When ingestion finished
+        session_id: Ingestion session ID for tracking
     """
     initialize_audit_log()
     csv_path = get_audit_log_path()
@@ -72,6 +102,7 @@ def log_ingestion(
 
     row = {
         "timestamp": start_time.isoformat(),
+        "session_id": session_id or "",
         "file_name": file_path.name,
         "file_path": str(file_path.absolute()),
         "doc_id": doc_id[-8:] if len(doc_id) >= 8 else doc_id,  # Last 8 chars for brevity

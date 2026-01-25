@@ -12,15 +12,20 @@ to avoid SQLite write contention.
 import multiprocessing as mp
 import threading
 import hashlib
+import signal
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty as QueueEmpty
 from typing import List, Optional, Callable, Dict, Any
 
-from src.config import get_logger
+from datetime import datetime
+
+from src.config import get_logger, set_session_id
+from src.ingestion.lock import IngestionLock, IngestionLockError
 from src.ingestion.document import load_document, extract_metadata
 from src.ingestion.chunker import chunk_document
+from src.ingestion.audit_log import log_ingestion
 from src.storage.chroma_client import _add_vectors_chromadb_only, rollback_batch
 from src.storage.bm25_index import get_bm25_index
 from src.utils import embed
@@ -67,6 +72,7 @@ class ParallelIngestionResult:
     resumed: int
     total_chunks: int
     duration_seconds: float
+    session_id: str = None
     errors: List[dict] = field(default_factory=list)
 
 
@@ -108,7 +114,8 @@ def _parse_document_worker(
     worker_id: int,
     file_queue: mp.Queue,
     chunk_queue: mp.Queue,
-    session_id: str = None
+    session_id: str = None,
+    status_db_path: Path = None
 ):
     """Worker process that parses documents and extracts chunks.
 
@@ -119,17 +126,24 @@ def _parse_document_worker(
         file_queue: Queue of file paths to process
         chunk_queue: Queue to send parsed chunks to writer
         session_id: Session ID for status tracking
+        status_db_path: Path to status database (required for Windows spawn)
     """
     # Set process name for logging - will appear as %(processName)s in log format
     mp.current_process().name = f"Worker-{worker_id}"
-    logger.info("Started")
+    # Set session_id for logging context in this worker process
+    if session_id:
+        set_session_id(session_id)
+    logger.info("Worker process started")
 
     # Initialize status manager for this worker
+    # On Windows (spawn), we need the explicit path since project settings aren't inherited
     status_mgr = None
     if session_id:
         try:
-            status_mgr = StatusManager()
-            status_mgr.register_worker(session_id, worker_id, "parser")
+            import os
+            status_mgr = StatusManager(db_path=status_db_path) if status_db_path else StatusManager()
+            status_mgr.register_worker(session_id, worker_id, "parser", pid=os.getpid())
+            logger.info(f"Status manager initialized (db: {status_mgr.db_path}, session: {session_id})")
         except Exception as e:
             logger.warning(f"Failed to initialize status manager: {e}")
 
@@ -147,8 +161,8 @@ def _parse_document_worker(
                         status_mgr.mark_signal_processed(session_id, worker_id)
                         stopped_by_signal = True
                         break
-                except Exception:
-                    pass  # Ignore status check errors
+                except Exception as e:
+                    logger.warning(f"Error checking stop signal: {e}")
 
             # Get next file from queue
             file_path = file_queue.get(timeout=1)
@@ -171,9 +185,26 @@ def _parse_document_worker(
                     except Exception:
                         pass
 
+                # Helper function to check for stop signal during processing
+                def check_stop():
+                    if status_mgr and session_id:
+                        try:
+                            if status_mgr.check_stop_signal(session_id, worker_id):
+                                return True
+                        except Exception:
+                            pass
+                    return False
+
                 # PARSE DOCUMENT (CPU-intensive, happens in parallel)
                 # Step 1: Load document (OCR, table extraction, etc.)
                 doc, page_count = load_document(file_path)
+
+                # Check for stop signal after document loading
+                if check_stop():
+                    logger.info("Received stop signal after document load, shutting down...")
+                    status_mgr.mark_signal_processed(session_id, worker_id)
+                    stopped_by_signal = True
+                    break
 
                 # Step 2: Compute doc_id and file_hash for checkpoint
                 doc_id = hashlib.md5(str(file_path.absolute()).encode()).hexdigest()
@@ -181,6 +212,13 @@ def _parse_document_worker(
 
                 # Step 3: Chunk document
                 chunks = chunk_document(doc, doc_id=str(file_path))
+
+                # Check for stop signal after chunking
+                if check_stop():
+                    logger.info("Received stop signal after chunking, shutting down...")
+                    status_mgr.mark_signal_processed(session_id, worker_id)
+                    stopped_by_signal = True
+                    break
 
                 if not chunks:
                     logger.warning(f"No chunks extracted from {file_path.name}")
@@ -202,7 +240,10 @@ def _parse_document_worker(
                         'worker_id': worker_id,
                         'file': str(file_path),
                         'status': 'failed',
-                        'error': 'No chunks extracted'
+                        'error': 'No chunks extracted',
+                        'doc_id': doc_id,
+                        'doc_type': file_path.suffix.lstrip('.'),
+                        'num_pages': page_count
                     })
                     continue
 
@@ -228,6 +269,13 @@ def _parse_document_worker(
                 chunk_texts = [chunk.text for chunk in chunks]
                 embeddings = embed(chunk_texts, show_progress=False)
                 logger.info(f"Embeddings generated for {file_path.name}")
+
+                # Check for stop signal after embedding
+                if check_stop():
+                    logger.info("Received stop signal after embedding, shutting down...")
+                    status_mgr.mark_signal_processed(session_id, worker_id)
+                    stopped_by_signal = True
+                    break
 
                 # Send parsed chunks WITH embeddings to writer
                 # Convert metadata to dict for serialization
@@ -319,7 +367,8 @@ def _writer_thread_func(
     chunk_queue: mp.Queue,
     stats: Dict,
     batch_size: int = 100,
-    session_id: str = None
+    session_id: str = None,
+    status_db_path: Path = None
 ):
     """Single writer thread that consumes parsed chunks and writes to databases.
 
@@ -330,16 +379,17 @@ def _writer_thread_func(
         stats: Shared statistics dict
         batch_size: Size of batches for database writes
         session_id: Session ID for status tracking
+        status_db_path: Path to status database
     """
-    # Set thread name for logging - will appear as %(processName)s in log format
+    # Set thread name for internal tracking (note: %(processName)s shows process name, not thread name)
     threading.current_thread().name = "Writer"
-    logger.info("Started")
+    logger.info("Writer thread started")
 
     # Initialize status manager for writer
     status_mgr = None
     if session_id:
         try:
-            status_mgr = StatusManager()
+            status_mgr = StatusManager(db_path=status_db_path) if status_db_path else StatusManager()
             status_mgr.register_worker(session_id, 0, "writer")
         except Exception as e:
             logger.warning(f"Failed to initialize status manager: {e}")
@@ -367,6 +417,23 @@ def _writer_thread_func(
                     'file': item.get('file', 'unknown'),
                     'error': item.get('error', 'Unknown error')
                 })
+                # Log failure to audit CSV
+                try:
+                    file_path = Path(item.get('file', 'unknown'))
+                    log_ingestion(
+                        file_path=file_path,
+                        doc_id=item.get('doc_id', 'unknown'),
+                        doc_type=item.get('doc_type', file_path.suffix.lstrip('.')),
+                        language='unknown',
+                        num_pages=item.get('num_pages'),
+                        num_chunks=0,
+                        status="failed",
+                        start_time=datetime.now(),  # Approximate
+                        end_time=datetime.now(),
+                        session_id=session_id
+                    )
+                except Exception:
+                    pass  # Don't fail ingestion due to logging errors
                 continue
 
             elif item['status'] == 'parsed':
@@ -377,6 +444,7 @@ def _writer_thread_func(
                     file_path = Path(item['file'])
                     doc_id = item['doc_id']
                     file_hash = item['file_hash']
+                    file_start_time = datetime.now()  # Track start time for audit log
 
                     # Update status: writing started
                     if status_mgr and session_id:
@@ -438,7 +506,6 @@ def _writer_thread_func(
                         elif isinstance(ingested_at, str):
                             ingested_at_str = ingested_at
                         else:
-                            from datetime import datetime
                             ingested_at_str = datetime.now().isoformat()
 
                         batch_metadatas = [
@@ -511,6 +578,23 @@ def _writer_thread_func(
                     logger.info(f"Stored {item['num_chunks']} chunks from "
                                f"{file_path.name}")
 
+                    # Log to audit CSV
+                    try:
+                        log_ingestion(
+                            file_path=file_path,
+                            doc_id=doc_id,
+                            doc_type=metadata.get('doc_type', file_path.suffix.lstrip('.')),
+                            language=metadata.get('language', 'unknown'),
+                            num_pages=metadata.get('num_pages'),
+                            num_chunks=item['num_chunks'],
+                            status="completed",
+                            start_time=file_start_time,
+                            end_time=datetime.now(),
+                            session_id=session_id
+                        )
+                    except Exception:
+                        pass  # Don't fail ingestion due to audit log errors
+
                 except Exception as e:
                     stats['failed'] += 1
                     stats['errors'].append({
@@ -535,6 +619,23 @@ def _writer_thread_func(
                             pass
 
                     logger.error(f"Failed to store chunks: {e}")
+
+                    # Log failure to audit CSV
+                    try:
+                        log_ingestion(
+                            file_path=file_path,
+                            doc_id=doc_id if doc_id else "unknown",
+                            doc_type=metadata.get('doc_type', file_path.suffix.lstrip('.')) if metadata else "unknown",
+                            language=metadata.get('language', 'unknown') if metadata else "unknown",
+                            num_pages=metadata.get('num_pages') if metadata else None,
+                            num_chunks=item.get('num_chunks', 0),
+                            status="failed",
+                            start_time=file_start_time,
+                            end_time=datetime.now(),
+                            session_id=session_id
+                        )
+                    except Exception:
+                        pass  # Don't fail on audit log errors
 
         except QueueEmpty:
             # Update heartbeat during idle
@@ -665,7 +766,10 @@ def parallel_ingest_documents(
 
     Raises:
         ValueError: If source is not a directory or doesn't exist
+        IngestionLockError: If another ingestion is already running
     """
+    from src.config import settings
+
     if config is None:
         config = ParallelIngestionConfig()
 
@@ -674,6 +778,90 @@ def parallel_ingest_documents(
 
     if not source.is_dir():
         raise ValueError(f"Not a directory: {source}")
+
+    # Acquire project-level lock to prevent concurrent ingestion
+    project_dir = settings.chroma_persist_dir.parent
+    lock = IngestionLock(project_dir)
+
+    if not lock.acquire():
+        # Get info about existing session for helpful error message
+        lock_info = lock.get_lock_info()
+        status_mgr = get_status_manager()
+        active = status_mgr.get_active_session()
+
+        if active:
+            raise IngestionLockError(
+                f"Ingestion already running (session {active.session_id}, "
+                f"started {active.started_at.strftime('%H:%M:%S')}). "
+                f"Use 'rag status' to monitor or 'rag stop' to cancel."
+            )
+        elif lock_info:
+            raise IngestionLockError(
+                f"Another ingestion process is running (PID {lock_info.get('pid')}, "
+                f"started {lock_info.get('started_at', 'unknown')}). "
+                f"If this is stale, delete {lock.lock_file}"
+            )
+        else:
+            raise IngestionLockError("Another ingestion process is running.")
+
+    # Variables for cleanup handler
+    session_id = None
+    cleanup_done = False
+    original_sigint = signal.getsignal(signal.SIGINT)
+    original_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def cleanup_handler(signum, frame):
+        """Handle interrupt signals by releasing lock and marking session."""
+        nonlocal cleanup_done
+        if cleanup_done:
+            return
+        cleanup_done = True
+
+        logger.info("Received interrupt signal, cleaning up...")
+        lock.release()
+        if session_id:
+            try:
+                status_mgr = get_status_manager()
+                status_mgr.complete_session(session_id, "interrupted")
+            except Exception:
+                pass
+
+        # Re-raise the signal to allow normal interrupt handling
+        signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGTERM, original_sigterm)
+        raise KeyboardInterrupt
+
+    # Install signal handlers
+    signal.signal(signal.SIGINT, cleanup_handler)
+    signal.signal(signal.SIGTERM, cleanup_handler)
+
+    try:
+        return _parallel_ingest_documents_impl(source, config, progress_callback, lock)
+    finally:
+        # Restore original signal handlers
+        signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGTERM, original_sigterm)
+        # Release lock
+        lock.release()
+
+
+def _parallel_ingest_documents_impl(
+    source: Path,
+    config: ParallelIngestionConfig,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+    lock: IngestionLock,
+) -> ParallelIngestionResult:
+    """Implementation of parallel document ingestion (called after lock acquired).
+
+    Args:
+        source: Directory containing documents to ingest
+        config: Configuration options
+        progress_callback: Optional callback for progress updates
+        lock: The acquired ingestion lock
+
+    Returns:
+        ParallelIngestionResult with statistics
+    """
 
     logger.info("=" * 60)
     logger.info("PARALLEL DOCUMENT INGESTION")
@@ -741,15 +929,19 @@ def parallel_ingest_documents(
 
     # Create ingestion session for status tracking
     session_id = None
+    status_db_path = None
     try:
         status_mgr = get_status_manager()
+        # Get the db path to pass to workers (needed for Windows spawn)
+        status_db_path = status_mgr.db_path
         session_id = status_mgr.create_session(
             source_path=str(source),
             num_workers=config.num_workers,
             total_files=len(files),
             skipped_files=stats.get('skipped', 0)
         )
-        logger.info(f"Session ID: {session_id}")
+        # Set session_id for logging context
+        set_session_id(session_id)
     except Exception as e:
         logger.warning(f"Failed to create status session: {e}")
 
@@ -764,7 +956,7 @@ def parallel_ingest_documents(
     # Start writer thread (single thread, all DB writes)
     writer = threading.Thread(
         target=_writer_thread_func,
-        args=(chunk_queue, stats, config.batch_size, session_id),
+        args=(chunk_queue, stats, config.batch_size, session_id, status_db_path),
         daemon=True
     )
     writer.start()
@@ -775,7 +967,7 @@ def parallel_ingest_documents(
     for i in range(config.num_workers):
         p = mp.Process(
             target=_parse_document_worker,
-            args=(i, file_queue, chunk_queue, session_id)
+            args=(i, file_queue, chunk_queue, session_id, status_db_path)
         )
         p.start()
         workers.append(p)
@@ -867,5 +1059,6 @@ def parallel_ingest_documents(
         resumed=stats.get('resumed', 0),
         total_chunks=stats['total_chunks'],
         duration_seconds=elapsed,
+        session_id=session_id,
         errors=errors
     )

@@ -106,10 +106,10 @@ RAG_CHROMA_SERVER_API_KEY=  # Optional authentication
 3. **Test concurrent access:**
 ```bash
 # Terminal 1: Start MCP server
-rag serve --mcp
+rag mcp serve
 
 # Terminal 2: Run queries simultaneously
-rag query-cmd "test query"
+rag query "test query"
 ```
 
 **Docker Setup (Production):**
@@ -136,13 +136,13 @@ This system is **100% offline-capable** after initial setup. All operations work
 
 ```bash
 # Download embedding model (one-time setup, ~420MB)
-rag models --download
+rag config models --download
 
 # Verify model is downloaded
-rag models --verify
+rag config models --verify
 
 # View model path
-rag models --info
+rag config models --info
 ```
 
 **Model Storage (based on .env settings):**
@@ -168,11 +168,11 @@ The system enforces strict offline operation through code-level parameters (not 
 **Verify Offline Mode:**
 ```bash
 # 1. Download models once (requires internet)
-rag models --download
-rag models --verify
+rag config models --download
+rag config models --verify
 
 # 2. Test offline operation (disconnect internet or use airplane mode)
-rag sync document.pdf
+rag ingestion start document.pdf
 rag query "test query"
 
 # All operations should work without internet connection
@@ -182,12 +182,17 @@ rag query "test query"
 ### CLI Usage
 
 ```bash
-# Sync documents (works with files or folders)
-rag sync document.pdf                   # Single file
-rag sync ./documents                    # Entire folder (auto-detected, recursive)
-rag sync ./docs --no-recursive          # Folder without subdirectories
-rag sync ./documents --force            # Force re-ingest all files
-rag sync ./documents --dry-run          # Preview changes without applying
+# Ingest documents (works with files or folders)
+rag ingestion start document.pdf              # Single file
+rag ingestion start ./documents               # Entire folder (auto-detected, recursive)
+rag ingestion start ./docs --no-recursive     # Folder without subdirectories
+rag ingestion start ./documents --force       # Force re-ingest all files
+rag ingestion start ./documents --dry-run     # Preview changes without applying
+
+# Monitor and control ingestion
+rag ingestion status                          # Live dashboard
+rag ingestion stop                            # Stop running ingestion
+rag ingestion log                             # View ingestion history
 
 # Query and retrieve relevant context
 rag query "What is machine learning?"
@@ -197,13 +202,19 @@ rag query "Explain the concept" --top-k 10
 rag stats
 
 # Show configuration
-rag config-show
+rag config show
+
+# Device and model management
+rag config device                             # Show device info
+rag config models --verify                    # Verify models
 
 # Reset system
 rag reset
 
 # Start MCP server
-rag serve --mcp
+rag mcp serve
+rag mcp status                                # Show server status
+rag mcp metrics                               # Show detailed metrics
 ```
 
 ## MCP Server
@@ -219,7 +230,7 @@ RAG_MCP_HOST=127.0.0.1
 RAG_MCP_PORT=8080
 
 # Start server:
-rag serve
+rag mcp serve
 # Server runs on http://127.0.0.1:8080
 ```
 
@@ -249,9 +260,9 @@ All MCP settings are configurable via environment variables:
 
 See `.env.example` for complete configuration options.
 
-### Smart Syncing
+### Smart Ingestion
 
-The `sync` command automatically:
+The `ingestion start` command automatically:
 - **Handles files and folders** - Works with single files or entire directories
 - **Filters file types** - Only processes supported formats (PDF, DOCX, PPTX, XLSX, HTML, MD, images, audio)
 - **Detects changes** - Finds new, modified, and deleted files
@@ -338,7 +349,7 @@ src/
 1. Read `docs/HOW_IT_WORKS.md` for a complete beginner's guide
 2. Read `src/query.py` - it's the main orchestrator with clear comments
 3. Follow the code flow: query.py → search.py
-4. Try it: `rag sync paper.pdf` then `rag query "what is this about?"`
+4. Try it: `rag ingestion start paper.pdf` then `rag query "what is this about?"`
 
 ## Configuration Reference
 

@@ -5,10 +5,38 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src", "cli", "config"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "cli/",
+    "config/",
+    "models/.gitkeep",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+]
+
 [project]
 name = "docling-rag"
 version = "0.1.0"
 description = "Production-ready RAG system with Docling and ChromaDB"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Arif", email = "arif@example.com"}
+]
+keywords = ["rag", "docling", "chromadb", "mcp", "document-processing", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 requires-python = ">=3.11"
 dependencies = [
     "docling>=2.68.0",
@@ -31,13 +59,23 @@ dependencies = [
 dev = [
     "ruff>=0.3",
     "mypy>=1.9",
+    "pytest>=8.0",
 ]
 # GPU support - install with: pip install docling-rag[gpu]
-# Note: For CUDA, you may need to install PyTorch separately:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
 gpu = [
     "accelerate>=0.25.0",
 ]
+# For building standalone executables
+build = [
+    "pyinstaller>=6.0",
+    "nuitka>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/docling-rag"
+Documentation = "https://github.com/yourusername/docling-rag#readme"
+Repository = "https://github.com/yourusername/docling-rag"
+Issues = "https://github.com/yourusername/docling-rag/issues"
 
 [project.scripts]
 rag = "cli.cli:app"

@@ -62,6 +62,7 @@ def get_embedder():
     if _embedder_cache is not None:
         return _embedder_cache
 
+    import warnings
     from sentence_transformers import SentenceTransformer
 
     local_path = get_model_paths()["embedding"]
@@ -74,12 +75,17 @@ def get_embedder():
         )
 
     logger.info(f"Loading embedding model from {local_path}")
-    model = SentenceTransformer(
-        str(local_path),
-        device=settings.device,
-        local_files_only=True,  # Enforce offline mode - prevents any network access
-        trust_remote_code=False  # Security: prevents downloading remote code
-    )
+
+    # Suppress false tokenizer warning about Mistral regex patterns
+    # (this warning is triggered incorrectly for non-Mistral models)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*incorrect regex pattern.*fix_mistral_regex.*")
+        model = SentenceTransformer(
+            str(local_path),
+            device=settings.device,
+            local_files_only=True,  # Enforce offline mode - prevents any network access
+            trust_remote_code=False  # Security: prevents downloading remote code
+        )
     _embedder_cache = model
     return model
 
@@ -421,14 +427,11 @@ def cleanup_all_resources() -> None:
     from .storage.chroma_client import cleanup_chroma_client
     cleanup_chroma_client()
 
-    # Clear BM25 index from memory (but don't delete the saved file)
+    # Close BM25 index database connection (frees memory, keeps data on disk)
     from .storage.bm25_index import get_bm25_index
     bm25_index = get_bm25_index()
-    if bm25_index.index is not None:
-        bm25_index.index = None
-        bm25_index.documents = []
-        bm25_index.doc_ids = []
-        logger.info("BM25 index cleared from memory")
+    bm25_index.close()
+    logger.info("BM25 index connection closed")
 
     # Force garbage collection to free memory
     gc.collect()

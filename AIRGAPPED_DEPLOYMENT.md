@@ -74,7 +74,7 @@ source .venv/bin/activate  # Linux/Mac
 .venv\Scripts\activate     # Windows
 
 # Download all models using CLI
-rag models --download
+rag config models --download
 ```
 
 Then copy the entire `models/` directory:
@@ -195,16 +195,16 @@ RAG_OCR_ENGINE=auto
 RAG_OCR_LANGUAGES=eng+ara
 ```
 
-**Note:** Offline mode is enabled by default. The `rag models --download` command temporarily disables it to download models.
+**Note:** Offline mode is enabled by default. The `rag config models --download` command temporarily disables it to download models.
 
 ## Step 6: Verify Installation
 
 ```bash
 # Check device configuration
-rag device
+rag config device
 
 # Verify models
-rag models
+rag config models --verify
 
 # Expected output:
 # Models Status
@@ -213,7 +213,7 @@ rag models
 # └── Docling Tables: OK
 
 # Test ingestion
-rag ingest test.pdf --dry-run
+rag ingestion start test.pdf --dry-run
 
 # Test query
 rag query "test query"
@@ -359,7 +359,7 @@ The system supports GPU acceleration for embedding generation, which significant
 ### Check Device Status
 
 ```bash
-rag device
+rag config device
 ```
 
 Output (CPU):

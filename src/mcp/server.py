@@ -1,4 +1,5 @@
 import atexit
+import os
 import signal
 import sys
 
@@ -9,6 +10,8 @@ from ..query import query
 from ..storage.chroma_client import list_documents
 from ..models import QueryResult
 from ..utils import cleanup_all_resources
+from .monitoring import track_query
+from .status import get_mcp_status_manager
 
 logger = get_logger(__name__)
 mcp = FastMCP(
@@ -18,6 +21,7 @@ mcp = FastMCP(
 
 
 @mcp.tool(description=settings.mcp_tool_query_description)
+@track_query
 async def query_rag(
     query_text: str,
     top_k: int = 5,
@@ -63,9 +67,42 @@ async def list_all_documents(
     }
 
 
+def _register_server():
+    """Register the server in the status database."""
+    try:
+        manager = get_mcp_status_manager()
+        manager.register_server(
+            pid=os.getpid(),
+            host=settings.mcp_host,
+            port=settings.mcp_port
+        )
+    except Exception as e:
+        logger.warning(f"Failed to register server: {e}")
+
+
+def _unregister_server():
+    """Mark server as stopped in the status database."""
+    try:
+        manager = get_mcp_status_manager()
+        manager.mark_server_stopped()
+    except Exception as e:
+        logger.warning(f"Failed to unregister server: {e}")
+
+
+def _cleanup_metrics():
+    """Cleanup old metrics based on retention settings."""
+    try:
+        retention_days = getattr(settings, 'mcp_metrics_retention_days', 7)
+        manager = get_mcp_status_manager()
+        manager.cleanup_old_metrics(retention_days=retention_days)
+    except Exception as e:
+        logger.warning(f"Failed to cleanup metrics: {e}")
+
+
 def _cleanup_on_shutdown():
     """Cleanup resources on server shutdown."""
     logger.info("Shutting down MCP server, cleaning up resources...")
+    _unregister_server()
     cleanup_all_resources()
     logger.info("Cleanup complete")
 
@@ -77,6 +114,21 @@ def _handle_signal(signum, frame):
     sys.exit(0)
 
 
+def _setup_health_routes():
+    """Setup health check routes with the MCP server's underlying app."""
+    try:
+        from .health import register_health_routes
+
+        # FastMCP uses Starlette under the hood
+        # Access the underlying ASGI app through mcp._app
+        if hasattr(mcp, '_app') and mcp._app is not None:
+            register_health_routes(mcp._app)
+        else:
+            logger.warning("Cannot register health routes: MCP app not initialized")
+    except Exception as e:
+        logger.warning(f"Failed to setup health routes: {e}")
+
+
 def run_server():
     """Run the MCP server with streamable-http transport and proper resource cleanup."""
     # Register cleanup handlers
@@ -85,9 +137,16 @@ def run_server():
         signal.signal(signal.SIGINT, _handle_signal)
         signal.signal(signal.SIGTERM, _handle_signal)
 
+    # Register the server in status database
+    if getattr(settings, 'mcp_metrics_enabled', True):
+        _register_server()
+        _cleanup_metrics()
+
     logger.info(f"Starting MCP server (transport={settings.mcp_transport}, host={settings.mcp_host}, port={settings.mcp_port})")
 
     try:
+        # Note: Health routes need to be registered after mcp.run() initializes the app
+        # For streamable-http transport, we can try to hook into the startup
         mcp.run(
             transport=settings.mcp_transport,
             host=settings.mcp_host,
@@ -99,6 +158,12 @@ def run_server():
             _cleanup_on_shutdown()
     except Exception as e:
         logger.error(f"Server error: {e}")
+        if getattr(settings, 'mcp_metrics_enabled', True):
+            try:
+                manager = get_mcp_status_manager()
+                manager.mark_server_crashed()
+            except Exception:
+                pass
         if settings.mcp_enable_cleanup:
             _cleanup_on_shutdown()
         raise

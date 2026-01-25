@@ -16,8 +16,13 @@ from ..config import settings, get_logger
 
 logger = get_logger(__name__)
 
-# Status file location
-STATUS_DB_PATH = settings.chroma_persist_dir.parent / "ingestion_status.db"
+
+def get_status_db_path() -> Path:
+    """Get the status database path for the current project.
+
+    Must be called AFTER apply_project_settings() to get correct path.
+    """
+    return settings.chroma_persist_dir.parent / "ingestion_status.db"
 
 
 @dataclass
@@ -89,7 +94,7 @@ class StatusManager:
     """Manages ingestion status using SQLite for concurrent access."""
 
     def __init__(self, db_path: Path = None):
-        self.db_path = db_path or STATUS_DB_PATH
+        self.db_path = db_path or get_status_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -108,7 +113,8 @@ class StatusManager:
                     skipped_files INTEGER DEFAULT 0,
                     total_chunks INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'running',
-                    error_message TEXT
+                    error_message TEXT,
+                    main_pid INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS workers (
@@ -116,6 +122,7 @@ class StatusManager:
                     worker_id INTEGER NOT NULL,
                     worker_type TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    pid INTEGER,
                     current_file TEXT,
                     started_at TEXT,
                     file_started_at TEXT,
@@ -139,6 +146,18 @@ class StatusManager:
                 CREATE INDEX IF NOT EXISTS idx_signals_session ON signals(session_id);
             """)
 
+            # Migration: Add pid column to workers if it doesn't exist (for existing databases)
+            try:
+                conn.execute("SELECT pid FROM workers LIMIT 1")
+            except sqlite3.OperationalError:
+                conn.execute("ALTER TABLE workers ADD COLUMN pid INTEGER")
+
+            # Migration: Add main_pid column to session if it doesn't exist
+            try:
+                conn.execute("SELECT main_pid FROM session LIMIT 1")
+            except sqlite3.OperationalError:
+                conn.execute("ALTER TABLE session ADD COLUMN main_pid INTEGER")
+
     @contextmanager
     def _get_connection(self):
         """Get a database connection with proper settings."""
@@ -157,31 +176,39 @@ class StatusManager:
         source_path: str,
         num_workers: int,
         total_files: int,
-        skipped_files: int = 0
+        skipped_files: int = 0,
+        main_pid: int = None
     ) -> str:
         """Create a new ingestion session."""
+        import os
+
         # Clean up any existing sessions first
         self.cleanup_stale_sessions()
 
         session_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
 
+        # Use current process PID if not provided
+        if main_pid is None:
+            main_pid = os.getpid()
+
         with self._get_connection() as conn:
             conn.execute("""
                 INSERT INTO session (
                     session_id, source_path, started_at, num_workers,
-                    total_files, skipped_files, status
-                ) VALUES (?, ?, ?, ?, ?, ?, 'running')
-            """, (session_id, source_path, now, num_workers, total_files, skipped_files))
+                    total_files, skipped_files, status, main_pid
+                ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
+            """, (session_id, source_path, now, num_workers, total_files, skipped_files, main_pid))
 
-        logger.info(f"Created ingestion session: {session_id}")
+        logger.info(f"Created ingestion session: {session_id} (main PID: {main_pid})")
         return session_id
 
     def register_worker(
         self,
         session_id: str,
         worker_id: int,
-        worker_type: str = "parser"
+        worker_type: str = "parser",
+        pid: int = None
     ):
         """Register a worker for the session."""
         now = datetime.now().isoformat()
@@ -190,9 +217,9 @@ class StatusManager:
             conn.execute("""
                 INSERT OR REPLACE INTO workers (
                     session_id, worker_id, worker_type, status,
-                    started_at, last_heartbeat
-                ) VALUES (?, ?, ?, 'idle', ?, ?)
-            """, (session_id, worker_id, worker_type, now, now))
+                    pid, started_at, last_heartbeat
+                ) VALUES (?, ?, ?, 'idle', ?, ?, ?)
+            """, (session_id, worker_id, worker_type, pid, now, now))
 
     def update_worker_status(
         self,
@@ -355,6 +382,36 @@ class StatusManager:
 
         return workers
 
+    def get_worker_pids(self, session_id: str) -> List[int]:
+        """Get PIDs of all workers for a session.
+
+        Returns list of PIDs that are not None.
+        """
+        pids = []
+
+        with self._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT pid FROM workers
+                WHERE session_id = ? AND pid IS NOT NULL
+            """, (session_id,)).fetchall()
+
+            for row in rows:
+                if row['pid']:
+                    pids.append(row['pid'])
+
+        return pids
+
+    def get_main_pid(self, session_id: str) -> Optional[int]:
+        """Get the main process PID for a session."""
+        with self._get_connection() as conn:
+            row = conn.execute("""
+                SELECT main_pid FROM session WHERE session_id = ?
+            """, (session_id,)).fetchone()
+
+            if row and row['main_pid']:
+                return row['main_pid']
+        return None
+
     def send_stop_signal(self, session_id: str, worker_id: int = None):
         """Send a stop signal to workers."""
         now = datetime.now().isoformat()
@@ -369,9 +426,9 @@ class StatusManager:
             """, (session_id, target, now))
 
         if worker_id is not None:
-            logger.info(f"Sent stop signal to worker {worker_id}")
+            logger.info(f"Sent stop signal to worker {worker_id} (session: {session_id}, db: {self.db_path})")
         else:
-            logger.info("Sent stop signal to all workers")
+            logger.info(f"Sent stop signal to all workers (session: {session_id}, db: {self.db_path})")
 
     def check_stop_signal(self, session_id: str, worker_id: int) -> bool:
         """Check if a stop signal exists for this worker."""
@@ -385,7 +442,10 @@ class StatusManager:
                 AND processed = 0
             """, (session_id, worker_id)).fetchone()
 
-            return row is not None
+            found = row is not None
+            if found:
+                logger.info(f"Stop signal found for worker {worker_id} (session: {session_id})")
+            return found
 
     def mark_signal_processed(self, session_id: str, worker_id: int):
         """Mark a stop signal as processed."""
@@ -456,13 +516,23 @@ class StatusManager:
         return sessions
 
 
-# Global status manager instance
+# Global status manager instance (cached per path)
 _status_manager: Optional[StatusManager] = None
+_status_manager_path: Optional[Path] = None
 
 
 def get_status_manager() -> StatusManager:
-    """Get or create the global status manager."""
-    global _status_manager
-    if _status_manager is None:
-        _status_manager = StatusManager()
+    """Get or create the status manager for the current project.
+
+    The manager is cached, but recreated if the project path changes.
+    """
+    global _status_manager, _status_manager_path
+
+    current_path = get_status_db_path()
+
+    # Recreate if path changed (project switched)
+    if _status_manager is None or _status_manager_path != current_path:
+        _status_manager = StatusManager(current_path)
+        _status_manager_path = current_path
+
     return _status_manager

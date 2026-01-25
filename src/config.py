@@ -20,7 +20,7 @@ import time
 
 
 class UppercaseFormatter(logging.Formatter):
-    """Custom formatter with uppercase month abbreviation."""
+    """Custom formatter with uppercase month abbreviation and optional session_id."""
     def formatTime(self, record, datefmt=None):
         ct = self.converter(record.created)
         if datefmt:
@@ -28,6 +28,33 @@ class UppercaseFormatter(logging.Formatter):
             return s.upper()
         else:
             return super().formatTime(record, datefmt)
+
+    def format(self, record):
+        # Add session_id to record if available
+        if not hasattr(record, 'session_id'):
+            record.session_id = _current_session_id
+        return super().format(record)
+
+
+# Global session ID for logging context
+_current_session_id = ""
+
+
+def set_session_id(session_id: str):
+    """Set the current session ID for logging context."""
+    global _current_session_id
+    _current_session_id = session_id if session_id else ""
+
+
+def get_session_id() -> str:
+    """Get the current session ID."""
+    return _current_session_id
+
+
+def clear_session_id():
+    """Clear the current session ID."""
+    global _current_session_id
+    _current_session_id = ""
 
 
 # Configure root logger to apply format globally to all loggers
@@ -41,7 +68,7 @@ for handler in _root_logger.handlers[:]:
 # Add our custom handler
 _handler = logging.StreamHandler()
 _formatter = UppercaseFormatter(
-    fmt="[%(levelname)s] [%(asctime)s] [%(processName)s] %(message)s",
+    fmt="[%(levelname)s] [%(asctime)s] [%(processName)s] [%(session_id)s] %(message)s",
     datefmt="%d-%b %H:%M:%S"
 )
 _handler.setFormatter(_formatter)
@@ -201,6 +228,10 @@ class Settings(BaseSettings):
     mcp_instructions: str = "You are a RAG (Retrieval-Augmented Generation) assistant with access to indexed documents. Use query_rag to retrieve relevant context and list_all_documents to browse available documents."
     mcp_enable_cleanup: bool = True
 
+    # MCP Monitoring Configuration
+    mcp_metrics_enabled: bool = True
+    mcp_metrics_retention_days: int = 7
+
     # MCP Tool Descriptions
     mcp_tool_query_description: str = """Query the RAG system to retrieve relevant document chunks based on semantic similarity.
 
@@ -255,6 +286,101 @@ Examples:
 
 
 settings = Settings()
+
+
+# ============================================================================
+# Project Integration
+# ============================================================================
+
+
+def get_active_project_settings() -> dict | None:
+    """Get settings from the active project if one exists.
+
+    Returns:
+        Dict with project settings or None if no active project
+    """
+    try:
+        from .project import get_project_manager
+        pm = get_project_manager()
+        project = pm.get_active_project()
+        if project:
+            paths = pm.get_project_paths(project.name)
+            return {
+                # Basic
+                "name": project.name,
+                "port": project.port,
+                "device": project.device,
+                "chroma_persist_dir": paths["chroma_path"],
+                "db_path": paths["db_path"],
+                "docs_path": paths["docs_path"],
+                # Document Processing
+                "enable_ocr": project.enable_ocr,
+                "ocr_engine": project.ocr_engine,
+                "ocr_languages": project.ocr_languages,
+                "enable_asr": project.enable_asr,
+                # Embedding & Chunking
+                "embedding_model": project.embedding_model,
+                "chunking_method": project.chunking_method,
+                "max_tokens": project.max_tokens,
+                # Retrieval
+                "default_top_k": project.default_top_k,
+                # MCP Server
+                "mcp_server_name": project.mcp_server_name,
+                "mcp_transport": project.mcp_transport,
+                "mcp_host": project.mcp_host,
+                "mcp_enable_cleanup": project.mcp_enable_cleanup,
+                # Logging
+                "log_level": project.log_level,
+            }
+    except Exception:
+        pass
+    return None
+
+
+def apply_project_settings() -> bool:
+    """Apply active project settings to the global settings.
+
+    Returns:
+        True if project settings were applied, False otherwise
+    """
+    global settings
+
+    project = get_active_project_settings()
+    if not project:
+        return False
+
+    # Override ALL settings with project values
+    # Paths
+    settings.chroma_persist_dir = project["chroma_persist_dir"]
+
+    # Document Processing
+    settings.enable_ocr = project["enable_ocr"]
+    settings.ocr_engine = project["ocr_engine"]
+    settings.ocr_languages = project["ocr_languages"]
+    settings.enable_asr = project["enable_asr"]
+
+    # Embedding & Chunking
+    settings.embedding_model = project["embedding_model"]
+    settings.chunking_method = project["chunking_method"]
+    settings.max_tokens = project["max_tokens"]
+
+    # Retrieval
+    settings.default_top_k = project["default_top_k"]
+
+    # MCP Server
+    settings.mcp_port = project["port"]
+    settings.mcp_server_name = project["mcp_server_name"]
+    settings.mcp_transport = project["mcp_transport"]
+    settings.mcp_host = project["mcp_host"]
+    settings.mcp_enable_cleanup = project["mcp_enable_cleanup"]
+
+    # Device
+    settings.device = project["device"]
+
+    # Logging
+    settings.log_level = project["log_level"]
+
+    return True
 
 
 # ============================================================================
