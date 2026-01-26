@@ -273,16 +273,50 @@ Option 2: Add to PATH (run commands from anywhere)
 
 QUICK START
 -----------
-1. rag init                    - First-time setup
-2. rag ingestion start C:\\docs - Add documents
-3. rag query "your question"   - Search documents
-4. rag mcp serve               - Start MCP server
+1. Create a project:
+   rag project create myproject
+
+2. Download models (first time only):
+   rag config models
+
+3. Add documents:
+   rag ingest C:\\docs
+
+4. Search documents:
+   rag query "your question"
+
+5. Start MCP server:
+   rag mcp serve
+
+CLI COMMANDS
+------------
+Core Commands:
+  rag ingest <path>           Ingest file or directory
+  rag query "question"        Query documents
+  rag list                    List indexed documents
+  rag remove <doc_id>         Remove a document
+  rag stats                   Show statistics
+  rag reset                   Clear all data
+
+Project Commands:
+  rag project create <name>   Create new project
+  rag project list            List all projects
+  rag project switch <name>   Switch to project
+  rag project delete <name>   Delete project
+
+MCP Commands:
+  rag mcp serve               Start MCP server
+  rag mcp stop                Stop instructions
+
+Config Commands:
+  rag config show             Show current settings
+  rag config models           Download required models
 
 OFFLINE OPERATION
 -----------------
 This distribution is fully offline-capable:
 - All ML models are included
-- No internet connection required
+- No internet connection required after initial setup
 
 SYSTEM REQUIREMENTS
 -------------------
