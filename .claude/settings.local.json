@@ -113,7 +113,8 @@
       "Bash(cmd /c:*)",
       "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\python\\\\python.exe\" -c:*)",
       "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" mcp status)",
-      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" mcp stop)"
+      "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" mcp stop)",
+      "Bash(.venv\\\\\\\\Scripts\\\\\\\\python:*)"
     ]
   }
 }
