@@ -10,17 +10,20 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions, LayoutModelCo
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import DoclingDocument
 
-from ..config import settings, get_logger, ENABLE_OCR
+from ..config import get_logger
 from ..models import DocumentLoadError, DocumentMetadata
 from ..utils import detect_language, get_model_paths
 
 logger = get_logger(__name__)
 
+
 def _get_ocr_options():
     from docling.datamodel.pipeline_options import RapidOcrOptions
     return RapidOcrOptions(lang=['english', 'arabic'], force_full_page_ocr=True)
 
-def load_document(source: str | Path | bytes | BinaryIO, doc_format: str | None = None) -> tuple[DoclingDocument, int | None]:
+
+def load_document(source: str | Path | bytes | BinaryIO, doc_format: str | None = None) -> tuple[
+    DoclingDocument, int | None]:
     try:
         page_count = None
         if isinstance(source, (str, Path)):
@@ -37,7 +40,7 @@ def load_document(source: str | Path | bytes | BinaryIO, doc_format: str | None 
         pipeline_options = PdfPipelineOptions()
         pipeline_options.accelerator_options = accelerator_options
         pipeline_options.ocr_options = _get_ocr_options()
-        pipeline_options.do_ocr = ENABLE_OCR
+        pipeline_options.do_ocr = False
         pipeline_options.enable_remote_services = False
 
         local_docling_path = get_model_paths()["docling_layout"]
@@ -54,7 +57,8 @@ def load_document(source: str | Path | bytes | BinaryIO, doc_format: str | None 
                     revision="main", model_path=str(layout_model_path), supported_devices=[AcceleratorDevice.CPU])
 
         converter = DocumentConverter(allowed_formats=None,
-            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)})
+                                      format_options={
+                                          InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)})
 
         logger.info(f"Processing {source}")
         result = converter.convert(source)
@@ -62,7 +66,9 @@ def load_document(source: str | Path | bytes | BinaryIO, doc_format: str | None 
     except Exception as e:
         raise DocumentLoadError(f"Failed to load document: {e}") from e
 
-def extract_metadata(doc: DoclingDocument, file_path: str | Path, num_chunks: int, num_pages: int | None = None) -> DocumentMetadata:
+
+def extract_metadata(doc: DoclingDocument, file_path: str | Path, num_chunks: int,
+                     num_pages: int | None = None) -> DocumentMetadata:
     file_path = Path(file_path) if isinstance(file_path, str) else file_path
     doc_id = hashlib.md5(str(file_path.absolute()).encode()).hexdigest()
     doc_type = file_path.suffix.lstrip(".").lower() if file_path.suffix else "unknown"

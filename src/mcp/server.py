@@ -4,20 +4,20 @@ import sys
 
 from fastmcp import FastMCP
 
-from ..config import settings, get_logger
+from ..config import MCP_SERVER_NAME, MCP_INSTRUCTIONS, MCP_TOOL_QUERY_DESC, MCP_TOOL_LIST_DOCS_DESC, MCP_HOST, MCP_PORT, MCP_TRANSPORT, get_logger
 from ..query import query
 from ..storage.chroma_client import list_documents
 from ..models import QueryResult
 from ..utils import cleanup_all_resources
 
 logger = get_logger(__name__)
-mcp = FastMCP(name=settings.mcp_server_name, instructions=settings.mcp_instructions)
+mcp = FastMCP(name=MCP_SERVER_NAME, instructions=MCP_INSTRUCTIONS)
 
-@mcp.tool(description=settings.mcp_tool_query_description)
+@mcp.tool(description=MCP_TOOL_QUERY_DESC)
 async def query_rag(query_text: str, top_k: int = 5) -> QueryResult:
     return query(query_text, top_k)
 
-@mcp.tool(description=settings.mcp_tool_list_docs_description)
+@mcp.tool(description=MCP_TOOL_LIST_DOCS_DESC)
 async def list_all_documents(limit: int | None = None, offset: int = 0) -> dict:
     documents = list_documents(limit=limit, offset=offset)
     total = len(list_documents())
@@ -36,9 +36,9 @@ def run_server():
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    logger.info(f"Starting MCP server ({settings.mcp_host}:{settings.mcp_port})")
+    logger.info(f"Starting MCP server ({MCP_HOST}:{MCP_PORT})")
     try:
-        mcp.run(transport=settings.mcp_transport, host=settings.mcp_host, port=settings.mcp_port)
+        mcp.run(transport=MCP_TRANSPORT, host=MCP_HOST, port=MCP_PORT)
     except KeyboardInterrupt:
         _cleanup_on_shutdown()
     except Exception as e:

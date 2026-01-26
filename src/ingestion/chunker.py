@@ -4,29 +4,22 @@ from typing import Iterable
 from docling.chunking import HybridChunker
 from docling_core.types.doc import DoclingDocument
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
+from transformers import AutoTokenizer
 
-from ..config import settings, get_logger
+from ..config import MAX_TOKENS, get_logger
 from ..models import ChunkingError, Chunk
 from ..utils import get_model_paths
 
 logger = get_logger(__name__)
 
-def chunk_document(doc: DoclingDocument, doc_id: str, method: str | None = None, max_tokens: int | None = None) -> list[Chunk]:
+def chunk_document(doc: DoclingDocument, doc_id: str) -> list[Chunk]:
     try:
-        method = method or settings.chunking_method
-        max_tokens = max_tokens or settings.max_tokens
-
-        if method == "hybrid":
-            from transformers import AutoTokenizer
-            local_model_path = get_model_paths()["embedding"]
-            if not local_model_path.exists():
-                raise ChunkingError(f"Tokenizer model not found at {local_model_path}. Run 'rag models --download' first.")
-            hf_tokenizer = AutoTokenizer.from_pretrained(str(local_model_path), local_files_only=True, trust_remote_code=False)
-            tokenizer = HuggingFaceTokenizer(tokenizer=hf_tokenizer, max_tokens=max_tokens)
-            chunker = HybridChunker(tokenizer=tokenizer, max_tokens=max_tokens)
-        else:
-            from docling.chunking import HierarchicalChunker
-            chunker = HierarchicalChunker()
+        local_model_path = get_model_paths()["embedding"]
+        if not local_model_path.exists():
+            raise ChunkingError(f"Tokenizer model not found at {local_model_path}. Run 'rag models --download' first.")
+        hf_tokenizer = AutoTokenizer.from_pretrained(str(local_model_path), local_files_only=True, trust_remote_code=False)
+        tokenizer = HuggingFaceTokenizer(tokenizer=hf_tokenizer, max_tokens=MAX_TOKENS)
+        chunker = HybridChunker(tokenizer=tokenizer, max_tokens=MAX_TOKENS)
 
         chunks: Iterable = chunker.chunk(doc)
         result = []

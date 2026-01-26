@@ -5,13 +5,13 @@ import zlib
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-from ..config import settings, get_logger
+from ..config import CHROMA_PERSIST_DIR, COLLECTION_NAME, get_logger
 
 logger = get_logger(__name__)
 
 class BM25SqliteIndex:
     def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = db_path or (settings.chroma_persist_dir / "bm25.sqlite3")
+        self.db_path = db_path or (CHROMA_PERSIST_DIR / "bm25.sqlite3")
         self.conn = None
         self.idf_scores = {}
         self.avg_doc_len = 0.0
@@ -194,7 +194,7 @@ def get_bm25_index() -> BM25SqliteIndex:
 def rebuild_bm25_index() -> None:
     from .chroma_client import get_chroma_client
     client = get_chroma_client()
-    collection = client.get_collection(settings.chroma_collection_name)
+    collection = client.get_collection(COLLECTION_NAME)
     results = collection.get()
     if not results['ids']:
         return

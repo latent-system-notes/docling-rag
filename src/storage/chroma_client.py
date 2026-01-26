@@ -6,7 +6,7 @@ import chromadb
 import numpy as np
 from chromadb.config import Settings as ChromaSettings
 
-from ..config import settings, get_logger
+from ..config import CHROMA_PERSIST_DIR, COLLECTION_NAME, EMBEDDING_MODEL, get_logger
 from ..models import StorageError
 
 logger = get_logger(__name__)
@@ -17,8 +17,8 @@ def get_chroma_client() -> chromadb.ClientAPI:
     if _chroma_client_cache is not None:
         return _chroma_client_cache
     try:
-        settings.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
-        client = chromadb.PersistentClient(path=str(settings.chroma_persist_dir), settings=ChromaSettings(anonymized_telemetry=False))
+        CHROMA_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(CHROMA_PERSIST_DIR), settings=ChromaSettings(anonymized_telemetry=False))
         _chroma_client_cache = client
         return client
     except Exception as e:
@@ -35,52 +35,47 @@ def cleanup_chroma_client() -> None:
         finally:
             _chroma_client_cache = None
 
-def create_collection(collection_name: str | None = None) -> None:
-    collection_name = collection_name or settings.chroma_collection_name
+def create_collection() -> None:
     try:
-        get_chroma_client().get_or_create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
+        get_chroma_client().get_or_create_collection(name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
     except Exception as e:
         raise StorageError(f"Failed to create collection: {e}") from e
 
-def _add_vectors_chromadb_only(ids: list[str], vectors: np.ndarray, metadata: list[dict], collection_name: str | None = None) -> None:
-    collection_name = collection_name or settings.chroma_collection_name
+def _add_vectors_chromadb_only(ids: list[str], vectors: np.ndarray, metadata: list[dict]) -> None:
     try:
-        collection = get_chroma_client().get_collection(collection_name)
+        collection = get_chroma_client().get_collection(COLLECTION_NAME)
         documents = [meta.get("text", "") for meta in metadata]
         metadatas = [{k: v if v is not None else "" for k, v in meta.items() if k != "text" and isinstance(v, (str, int, float, bool))} for meta in metadata]
         collection.add(ids=ids, embeddings=vectors.tolist(), documents=documents, metadatas=metadatas)
     except Exception as e:
         raise StorageError(f"Failed to add vectors to ChromaDB: {e}") from e
 
-def rollback_batch(ids: list[str], collection_name: str | None = None) -> None:
-    collection_name = collection_name or settings.chroma_collection_name
+def rollback_batch(ids: list[str]) -> None:
     try:
-        get_chroma_client().get_collection(collection_name).delete(ids=ids)
+        get_chroma_client().get_collection(COLLECTION_NAME).delete(ids=ids)
     except Exception as e:
         raise StorageError(f"Failed to rollback batch: {e}") from e
 
-def add_vectors(ids: list[str], vectors: np.ndarray, metadata: list[dict], collection_name: str | None = None) -> None:
-    collection_name = collection_name or settings.chroma_collection_name
+def add_vectors(ids: list[str], vectors: np.ndarray, metadata: list[dict]) -> None:
     documents = [meta.get("text", "") for meta in metadata]
     try:
-        _add_vectors_chromadb_only(ids, vectors, metadata, collection_name)
+        _add_vectors_chromadb_only(ids, vectors, metadata)
         from .bm25_index import get_bm25_index
         bm25_index = get_bm25_index()
         try:
             bm25_index.add_documents_atomic(documents, ids)
         except Exception:
-            rollback_batch(ids, collection_name)
+            rollback_batch(ids)
             raise
     except Exception as e:
         raise StorageError(f"Failed to add vectors: {e}") from e
 
-def search_vectors(query_vector: np.ndarray, top_k: int, collection_name: str | None = None, filter_expr: dict | None = None) -> list[dict]:
-    collection_name = collection_name or settings.chroma_collection_name
+def search_vectors(query_vector: np.ndarray, top_k: int) -> list[dict]:
     try:
-        collection = get_chroma_client().get_collection(collection_name)
+        collection = get_chroma_client().get_collection(COLLECTION_NAME)
         if query_vector.ndim == 2:
             query_vector = query_vector[0]
-        results = collection.query(query_embeddings=[query_vector.tolist()], n_results=top_k, where=filter_expr)
+        results = collection.query(query_embeddings=[query_vector.tolist()], n_results=top_k)
         if not results["ids"] or not results["ids"][0]:
             return []
         return [{"id": results["ids"][0][i], "distance": results["distances"][0][i], "score": 1.0 - results["distances"][0][i],
@@ -88,50 +83,41 @@ def search_vectors(query_vector: np.ndarray, top_k: int, collection_name: str | 
     except Exception as e:
         raise StorageError(f"Failed to search vectors: {e}") from e
 
-def delete_by_filter(filter_expr: dict, collection_name: str | None = None) -> None:
-    collection_name = collection_name or settings.chroma_collection_name
+def get_collection_stats() -> dict:
     try:
-        get_chroma_client().get_collection(collection_name).delete(where=filter_expr)
-    except Exception as e:
-        raise StorageError(f"Failed to delete vectors: {e}") from e
-
-def get_collection_stats(collection_name: str | None = None) -> dict:
-    collection_name = collection_name or settings.chroma_collection_name
-    try:
-        return {"row_count": get_chroma_client().get_collection(collection_name).count()}
+        return {"row_count": get_chroma_client().get_collection(COLLECTION_NAME).count()}
     except Exception as e:
         raise StorageError(f"Failed to get collection stats: {e}") from e
 
 def initialize_collections() -> None:
     create_collection()
 
-def reset_collection(collection_name: str | None = None) -> None:
-    collection_name = collection_name or settings.chroma_collection_name
+def reset_collection() -> None:
     try:
-        get_chroma_client().delete_collection(collection_name)
+        get_chroma_client().delete_collection(COLLECTION_NAME)
     except Exception:
         pass
     from .bm25_index import get_bm25_index
     get_bm25_index().clear()
-    create_collection(collection_name)
+    create_collection()
 
 def get_stats() -> dict:
     stats = get_collection_stats()
-    return {"collection": settings.chroma_collection_name, "total_chunks": stats["row_count"],
-            "embedding_model": settings.embedding_model, "vector_store": "chromadb"}
+    return {"collection": COLLECTION_NAME, "total_chunks": stats["row_count"],
+            "embedding_model": EMBEDDING_MODEL, "vector_store": "chromadb"}
 
 def document_exists(file_path: str | Path) -> bool:
     file_path = Path(file_path) if isinstance(file_path, str) else file_path
     doc_id = hashlib.md5(str(file_path.absolute()).encode()).hexdigest()
     try:
-        collection = get_chroma_client().get_collection(settings.chroma_collection_name)
+        collection = get_chroma_client().get_collection(COLLECTION_NAME)
         results = collection.get(where={"doc_id": doc_id}, limit=1)
         return len(results['ids']) > 0
     except Exception:
         return False
 
 def list_documents(limit: int | None = None, offset: int = 0) -> list[dict]:
-    collection = get_chroma_client().get_collection(settings.chroma_collection_name)
+    collection = get_chroma_client().get_collection(COLLECTION_NAME)
     results = collection.get()
     if not results['ids']:
         return []
@@ -152,7 +138,7 @@ def list_documents(limit: int | None = None, offset: int = 0) -> list[dict]:
     return documents
 
 def remove_document_by_id(doc_id_or_partial: str) -> int:
-    collection = get_chroma_client().get_collection(settings.chroma_collection_name)
+    collection = get_chroma_client().get_collection(COLLECTION_NAME)
     all_docs = list_documents()
     matching_doc = None
     if len(doc_id_or_partial) == 6:
@@ -183,7 +169,7 @@ def remove_document_by_id(doc_id_or_partial: str) -> int:
 def remove_document(file_path: str | Path) -> int:
     file_path = Path(file_path) if isinstance(file_path, str) else file_path
     doc_id = hashlib.md5(str(file_path.absolute()).encode()).hexdigest()
-    collection = get_chroma_client().get_collection(settings.chroma_collection_name)
+    collection = get_chroma_client().get_collection(COLLECTION_NAME)
     results = collection.get(where={"doc_id": doc_id})
     if not results['ids']:
         return 0

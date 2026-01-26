@@ -1,6 +1,5 @@
 import hashlib
 import multiprocessing as mp
-import signal
 import threading
 import time
 from dataclasses import dataclass, field
@@ -10,7 +9,6 @@ from queue import Empty as QueueEmpty
 from typing import List, Optional, Callable, Dict, Any
 
 from src.config import get_logger
-from src.ingestion.lock import IngestionLock, IngestionLockError
 from src.ingestion.document import load_document, extract_metadata
 from src.ingestion.chunker import chunk_document
 from src.storage.chroma_client import _add_vectors_chromadb_only, rollback_batch
@@ -219,7 +217,6 @@ def _filter_files_by_checkpoint(files: List[Path], stats: Dict, force: bool = Fa
     return files_to_process
 
 def parallel_ingest_documents(source: Path, config: ParallelIngestionConfig = None, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> ParallelIngestionResult:
-    from src.config import settings
     if config is None:
         config = ParallelIngestionConfig()
     if not source.exists():
@@ -227,39 +224,6 @@ def parallel_ingest_documents(source: Path, config: ParallelIngestionConfig = No
     if not source.is_dir():
         raise ValueError(f"Not a directory: {source}")
 
-    project_dir = settings.chroma_persist_dir.parent
-    lock = IngestionLock(project_dir)
-    if not lock.acquire():
-        lock_info = lock.get_lock_info()
-        if lock_info:
-            raise IngestionLockError(f"Another ingestion process is running (PID {lock_info.get('pid')}). Delete {lock.lock_file} if stale.")
-        else:
-            raise IngestionLockError("Another ingestion process is running.")
-
-    cleanup_done = False
-    original_sigint = signal.getsignal(signal.SIGINT)
-    original_sigterm = signal.getsignal(signal.SIGTERM)
-
-    def cleanup_handler(signum, frame):
-        nonlocal cleanup_done
-        if cleanup_done:
-            return
-        cleanup_done = True
-        lock.release()
-        signal.signal(signal.SIGINT, original_sigint)
-        signal.signal(signal.SIGTERM, original_sigterm)
-        raise KeyboardInterrupt
-
-    signal.signal(signal.SIGINT, cleanup_handler)
-    signal.signal(signal.SIGTERM, cleanup_handler)
-    try:
-        return _parallel_ingest_impl(source, config, progress_callback, lock)
-    finally:
-        signal.signal(signal.SIGINT, original_sigint)
-        signal.signal(signal.SIGTERM, original_sigterm)
-        lock.release()
-
-def _parallel_ingest_impl(source: Path, config: ParallelIngestionConfig, progress_callback: Optional[Callable[[Dict[str, Any]], None]], lock: IngestionLock) -> ParallelIngestionResult:
     logger.info(f"Parallel ingestion: {config.num_workers} workers, {source}")
     files = collect_files(source, config.extensions, config.recursive)
     if not files:

@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from ..config import settings, get_logger
+from ..config import get_logger
 from ..utils import embed
 from ..models import IngestionError, DocumentMetadata
 from .chunker import chunk_document

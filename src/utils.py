@@ -9,14 +9,14 @@ from typing import Optional
 import numpy as np
 from langdetect import LangDetectException, detect
 
-from .config import settings, get_logger
+from .config import device, EMBEDDING_BATCH_SIZE, EMBEDDING_MODEL, MODELS_DIR, get_logger
 from .models import EmbeddingError
 
 logger = get_logger(__name__)
 _embedder_cache: Optional[any] = None
 
 def detect_language(text: str) -> str:
-    if not settings.language_detection_enabled or not text:
+    if not text:
         return "unknown"
     try:
         return detect(text)
@@ -38,7 +38,7 @@ def get_embedder():
     logger.info(f"Loading embedding model from {local_path}")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=".*incorrect regex pattern.*fix_mistral_regex.*")
-        model = SentenceTransformer(str(local_path), device=settings.device, local_files_only=True, trust_remote_code=False)
+        model = SentenceTransformer(str(local_path), device=device, local_files_only=True, trust_remote_code=False)
     _embedder_cache = model
     return model
 
@@ -60,14 +60,14 @@ def embed(texts: str | list[str], show_progress: bool = False) -> np.ndarray:
         if not texts:
             raise EmbeddingError("No texts provided for embedding")
         embedder = get_embedder()
-        return embedder.encode(texts, batch_size=settings.embedding_batch_size, show_progress_bar=show_progress, convert_to_numpy=True)
+        return embedder.encode(texts, batch_size=EMBEDDING_BATCH_SIZE, show_progress_bar=show_progress, convert_to_numpy=True)
     except Exception as e:
         raise EmbeddingError(f"Failed to generate embeddings: {e}") from e
 
 def get_model_paths() -> dict[str, Path]:
-    embedding_name = settings.embedding_model.split("/")[-1]
+    embedding_name = EMBEDDING_MODEL.split("/")[-1]
     return {
-        "embedding": settings.models_dir / "embedding" / embedding_name,
+        "embedding": MODELS_DIR / "embedding" / embedding_name,
         "docling_layout": Path(os.environ.get("HF_HOME", "./models/.cache")) / "hub"
     }
 
@@ -75,8 +75,8 @@ def download_embedding_model() -> None:
     from sentence_transformers import SentenceTransformer
     path = get_model_paths()["embedding"]
     path.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Downloading embedding model: {settings.embedding_model}")
-    model = SentenceTransformer(settings.embedding_model)
+    logger.info(f"Downloading embedding model: {EMBEDDING_MODEL}")
+    model = SentenceTransformer(EMBEDDING_MODEL)
     model.save(str(path))
 
 def download_docling_models() -> None:

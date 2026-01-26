@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from ..config import settings, get_logger
+from ..config import CHECKPOINT_DIR, COLLECTION_NAME, CHECKPOINT_RETENTION_DAYS, get_logger
 from ..models import IngestionCheckpoint
 
 logger = get_logger(__name__)
@@ -18,9 +18,8 @@ def _compute_file_hash(file_path: Path) -> str:
 
 def get_checkpoint_path(file_path: Path) -> Path:
     doc_id = hashlib.md5(str(file_path.absolute()).encode()).hexdigest()
-    checkpoint_dir = settings.checkpoint_dir
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    return checkpoint_dir / f"{doc_id}.json"
+    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    return CHECKPOINT_DIR / f"{doc_id}.json"
 
 def create_checkpoint(file_path: Path, doc_id: str, total_chunks: int, metadata: dict) -> IngestionCheckpoint:
     file_hash = _compute_file_hash(file_path)
@@ -74,8 +73,7 @@ def validate_databases(checkpoint: IngestionCheckpoint, batch_size: int) -> bool
     from ..storage.bm25_index import get_bm25_index
     try:
         expected_chunks = min(len(checkpoint.processed_batches) * batch_size, checkpoint.total_chunks) if checkpoint.processed_batches else 0
-        client = get_chroma_client()
-        collection = client.get_collection(settings.chroma_collection_name)
+        collection = get_chroma_client().get_collection(COLLECTION_NAME)
         results = collection.get(where={"doc_id": checkpoint.doc_id})
         chromadb_chunk_count = len(results['ids']) if results['ids'] else 0
         if chromadb_chunk_count != expected_chunks:
@@ -91,8 +89,7 @@ def cleanup_partial_data(doc_id: str) -> None:
     from ..storage.chroma_client import get_chroma_client
     from ..storage.bm25_index import get_bm25_index
     try:
-        client = get_chroma_client()
-        collection = client.get_collection(settings.chroma_collection_name)
+        collection = get_chroma_client().get_collection(COLLECTION_NAME)
         results = collection.get(where={"doc_id": doc_id})
         if results['ids']:
             chunk_ids = results['ids']
@@ -104,11 +101,10 @@ def cleanup_partial_data(doc_id: str) -> None:
         pass
 
 def list_checkpoints() -> list[dict]:
-    checkpoint_dir = settings.checkpoint_dir
-    if not checkpoint_dir.exists():
+    if not CHECKPOINT_DIR.exists():
         return []
     checkpoints = []
-    for checkpoint_file in checkpoint_dir.glob("*.json"):
+    for checkpoint_file in CHECKPOINT_DIR.glob("*.json"):
         try:
             with open(checkpoint_file, 'r') as f:
                 data = json.load(f)
@@ -121,11 +117,10 @@ def list_checkpoints() -> list[dict]:
     return checkpoints
 
 def clean_all_checkpoints() -> int:
-    checkpoint_dir = settings.checkpoint_dir
-    if not checkpoint_dir.exists():
+    if not CHECKPOINT_DIR.exists():
         return 0
     count = 0
-    for checkpoint_file in checkpoint_dir.glob("*.json"):
+    for checkpoint_file in CHECKPOINT_DIR.glob("*.json"):
         try:
             checkpoint_file.unlink()
             count += 1
@@ -133,14 +128,12 @@ def clean_all_checkpoints() -> int:
             pass
     return count
 
-def clean_stale_checkpoints(days: int = None) -> int:
-    days = days or settings.checkpoint_retention_days
-    checkpoint_dir = settings.checkpoint_dir
-    if not checkpoint_dir.exists():
+def clean_stale_checkpoints() -> int:
+    if not CHECKPOINT_DIR.exists():
         return 0
-    cutoff_date = datetime.now() - timedelta(days=days)
+    cutoff_date = datetime.now() - timedelta(days=CHECKPOINT_RETENTION_DAYS)
     count = 0
-    for checkpoint_file in checkpoint_dir.glob("*.json"):
+    for checkpoint_file in CHECKPOINT_DIR.glob("*.json"):
         try:
             with open(checkpoint_file, 'r') as f:
                 data = json.load(f)
