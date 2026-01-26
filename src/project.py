@@ -1,10 +1,10 @@
 import json
-import os
 import shutil
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import os
 
 def get_rag_home() -> Path:
     return Path(os.environ.get("RAG_HOME", Path.home() / ".rag"))
@@ -122,22 +122,6 @@ class ProjectManager:
         self._save_global_config()
         return config
 
-    def update_project(self, name: str, port: Optional[int] = None, data_dir: Optional[str] = None, docs_dir: Optional[str] = None) -> ProjectConfig:
-        config = self.get_project(name)
-        if not config:
-            raise ValueError(f"Project '{name}' not found")
-        if port is not None:
-            for p in self.list_projects():
-                if p.port == port and p.name != name:
-                    raise ValueError(f"Port {port} used by '{p.name}'")
-            config.port = port
-        if data_dir is not None:
-            config.data_dir = data_dir
-        if docs_dir is not None:
-            config.docs_dir = docs_dir
-        self._save_project_config(config)
-        return config
-
     def delete_project(self, name: str, delete_data: bool = False):
         if not self.project_exists(name):
             raise ValueError(f"Project '{name}' not found")
@@ -164,12 +148,6 @@ class ProjectManager:
             "bm25_path": data_path / "bm25.db",
             "docs_dir": self._resolve_path(config, config.docs_dir),
         }
-
-    def get_project_stats(self, name: Optional[str] = None) -> dict:
-        paths = self.get_project_paths(name)
-        docs = sum(1 for f in paths["docs_dir"].rglob("*") if f.is_file()) if paths["docs_dir"].exists() else 0
-        size = sum(f.stat().st_size for f in paths["data_dir"].rglob("*") if f.is_file()) if paths["data_dir"].exists() else 0
-        return {"documents": docs, "disk_usage_mb": round(size / (1024 * 1024), 2)}
 
 _project_manager: Optional[ProjectManager] = None
 

@@ -9,16 +9,14 @@ from pathlib import Path
 from queue import Empty as QueueEmpty
 from typing import List, Optional, Callable, Dict, Any
 
-from src.config import get_logger, set_session_id
+from src.config import get_logger
 from src.ingestion.lock import IngestionLock, IngestionLockError
 from src.ingestion.document import load_document, extract_metadata
 from src.ingestion.chunker import chunk_document
-from src.ingestion.audit_log import log_ingestion
 from src.storage.chroma_client import _add_vectors_chromadb_only, rollback_batch
 from src.storage.bm25_index import get_bm25_index
 from src.utils import embed
 from src.ingestion.checkpoint import load_checkpoint, create_checkpoint, update_checkpoint, delete_checkpoint, validate_checkpoint, validate_databases, cleanup_partial_data, _compute_file_hash
-from src.ingestion.status import get_status_manager, StatusManager
 
 logger = get_logger(__name__)
 DEFAULT_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.xlsx', '.txt', '.md', '.html']
@@ -44,7 +42,6 @@ class ParallelIngestionResult:
     resumed: int
     total_chunks: int
     duration_seconds: float
-    session_id: str = None
     errors: List[dict] = field(default_factory=list)
 
 def collect_files(directory: Path, extensions: List[str] = None, recursive: bool = True) -> List[Path]:
@@ -55,70 +52,23 @@ def collect_files(directory: Path, extensions: List[str] = None, recursive: bool
         files.extend(directory.rglob(f'*{ext}') if recursive else directory.glob(f'*{ext}'))
     return sorted(files, key=lambda f: f.stat().st_size, reverse=True)
 
-def _parse_document_worker(worker_id: int, file_queue: mp.Queue, chunk_queue: mp.Queue, session_id: str = None, status_db_path: Path = None):
+def _parse_document_worker(worker_id: int, file_queue: mp.Queue, chunk_queue: mp.Queue):
     mp.current_process().name = f"Worker-{worker_id}"
-    if session_id:
-        set_session_id(session_id)
-    status_mgr = None
-    if session_id:
-        try:
-            import os
-            status_mgr = StatusManager(db_path=status_db_path) if status_db_path else StatusManager()
-            status_mgr.register_worker(session_id, worker_id, "parser", pid=os.getpid())
-        except Exception:
-            pass
-    processed, failed, stopped = 0, 0, False
+    processed, failed = 0, 0
 
     while True:
         try:
-            if status_mgr and session_id:
-                try:
-                    if status_mgr.check_stop_signal(session_id, worker_id):
-                        status_mgr.mark_signal_processed(session_id, worker_id)
-                        stopped = True
-                        break
-                except Exception:
-                    pass
             file_path = file_queue.get(timeout=1)
             if file_path is None:
                 break
             try:
-                if status_mgr and session_id:
-                    try:
-                        status_mgr.update_worker_status(session_id, worker_id, "parser", status="parsing", current_file=file_path.name, file_started=True)
-                    except Exception:
-                        pass
-
-                def check_stop():
-                    if status_mgr and session_id:
-                        try:
-                            return status_mgr.check_stop_signal(session_id, worker_id)
-                        except Exception:
-                            pass
-                    return False
-
                 doc, page_count = load_document(file_path)
-                if check_stop():
-                    status_mgr.mark_signal_processed(session_id, worker_id)
-                    stopped = True
-                    break
-
                 doc_id = hashlib.md5(str(file_path.absolute()).encode()).hexdigest()
                 file_hash = _compute_file_hash(file_path)
                 chunks = chunk_document(doc, doc_id=str(file_path))
 
-                if check_stop():
-                    status_mgr.mark_signal_processed(session_id, worker_id)
-                    stopped = True
-                    break
-
                 if not chunks:
                     failed += 1
-                    if status_mgr and session_id:
-                        try:
-                            status_mgr.update_worker_status(session_id, worker_id, "parser", status="idle", file_failed=True, error_message="No chunks extracted")
-                        except Exception:
-                            pass
                     chunk_queue.put({'worker_id': worker_id, 'file': str(file_path), 'status': 'failed', 'error': 'No chunks extracted',
                         'doc_id': doc_id, 'doc_type': file_path.suffix.lstrip('.'), 'num_pages': page_count})
                     continue
@@ -126,67 +76,28 @@ def _parse_document_worker(worker_id: int, file_queue: mp.Queue, chunk_queue: mp
                 metadata = extract_metadata(doc, file_path, len(chunks), page_count)
                 del doc
 
-                if status_mgr and session_id:
-                    try:
-                        status_mgr.update_worker_status(session_id, worker_id, "parser", status="embedding", current_file=file_path.name)
-                    except Exception:
-                        pass
-
                 chunk_texts = [chunk.text for chunk in chunks]
                 embeddings = embed(chunk_texts, show_progress=False)
-
-                if check_stop():
-                    status_mgr.mark_signal_processed(session_id, worker_id)
-                    stopped = True
-                    break
 
                 chunk_queue.put({'worker_id': worker_id, 'file': str(file_path), 'status': 'parsed', 'chunks': chunks,
                     'embeddings': embeddings, 'metadata': metadata.model_dump(), 'num_chunks': len(chunks),
                     'doc_id': doc_id, 'file_hash': file_hash, 'page_count': page_count})
                 processed += 1
 
-                if status_mgr and session_id:
-                    try:
-                        status_mgr.update_worker_status(session_id, worker_id, "parser", status="idle", file_completed=True)
-                    except Exception:
-                        pass
-
             except Exception as e:
                 failed += 1
                 logger.error(f"{file_path.name} - {e}")
-                if status_mgr and session_id:
-                    try:
-                        status_mgr.update_worker_status(session_id, worker_id, "parser", status="idle", file_failed=True, error_message=str(e))
-                    except Exception:
-                        pass
                 chunk_queue.put({'worker_id': worker_id, 'file': str(file_path), 'status': 'failed', 'error': str(e)})
 
         except mp.queues.Empty:
-            if status_mgr and session_id:
-                try:
-                    status_mgr.update_worker_status(session_id, worker_id, "parser", status="idle")
-                except Exception:
-                    pass
             continue
         except Exception:
             break
 
-    if status_mgr and session_id:
-        try:
-            status_mgr.update_worker_status(session_id, worker_id, "parser", status="stopped" if stopped else "finished")
-        except Exception:
-            pass
     chunk_queue.put({'worker_id': worker_id, 'status': 'worker_done', 'processed': processed, 'failed': failed})
 
-def _writer_thread_func(chunk_queue: mp.Queue, stats: Dict, batch_size: int = 100, session_id: str = None, status_db_path: Path = None):
+def _writer_thread_func(chunk_queue: mp.Queue, stats: Dict, batch_size: int = 100):
     threading.current_thread().name = "Writer"
-    status_mgr = None
-    if session_id:
-        try:
-            status_mgr = StatusManager(db_path=status_db_path) if status_db_path else StatusManager()
-            status_mgr.register_worker(session_id, 0, "writer")
-        except Exception:
-            pass
     bm25_index = get_bm25_index()
     workers_done = 0
     total_workers = stats.get('num_workers', 0)
@@ -200,14 +111,6 @@ def _writer_thread_func(chunk_queue: mp.Queue, stats: Dict, batch_size: int = 10
             elif item['status'] == 'failed':
                 stats['failed'] += 1
                 stats['errors'].append({'file': item.get('file', 'unknown'), 'error': item.get('error', 'Unknown error')})
-                try:
-                    file_path = Path(item.get('file', 'unknown'))
-                    log_ingestion(file_path=file_path, doc_id=item.get('doc_id', 'unknown'),
-                        doc_type=item.get('doc_type', file_path.suffix.lstrip('.')), language='unknown',
-                        num_pages=item.get('num_pages'), num_chunks=0, status="failed",
-                        start_time=datetime.now(), end_time=datetime.now(), session_id=session_id)
-                except Exception:
-                    pass
                 continue
             elif item['status'] == 'parsed':
                 try:
@@ -216,13 +119,6 @@ def _writer_thread_func(chunk_queue: mp.Queue, stats: Dict, batch_size: int = 10
                     metadata = item['metadata']
                     file_path = Path(item['file'])
                     doc_id = item['doc_id']
-                    file_start_time = datetime.now()
-
-                    if status_mgr and session_id:
-                        try:
-                            status_mgr.update_worker_status(session_id, 0, "writer", status="writing", current_file=file_path.name, file_started=True)
-                        except Exception:
-                            pass
 
                     checkpoint = load_checkpoint(file_path)
                     start_batch = 0
@@ -271,54 +167,15 @@ def _writer_thread_func(chunk_queue: mp.Queue, stats: Dict, batch_size: int = 10
                     stats['processed'] += 1
                     stats['total_chunks'] += item['num_chunks']
 
-                    if status_mgr and session_id:
-                        try:
-                            status_mgr.update_worker_status(session_id, 0, "writer", status="idle", file_completed=True)
-                            status_mgr.update_session_stats(session_id, processed_delta=1, chunks_delta=item['num_chunks'])
-                        except Exception:
-                            pass
-
-                    try:
-                        log_ingestion(file_path=file_path, doc_id=doc_id, doc_type=metadata.get('doc_type', file_path.suffix.lstrip('.')),
-                            language=metadata.get('language', 'unknown'), num_pages=metadata.get('num_pages'),
-                            num_chunks=item['num_chunks'], status="completed", start_time=file_start_time,
-                            end_time=datetime.now(), session_id=session_id)
-                    except Exception:
-                        pass
-
                 except Exception as e:
                     stats['failed'] += 1
                     stats['errors'].append({'file': item.get('file', 'unknown'), 'error': str(e)})
-                    if status_mgr and session_id:
-                        try:
-                            status_mgr.update_worker_status(session_id, 0, "writer", status="idle", file_failed=True, error_message=str(e))
-                            status_mgr.update_session_stats(session_id, failed_delta=1)
-                        except Exception:
-                            pass
-                    try:
-                        log_ingestion(file_path=file_path, doc_id=doc_id if doc_id else "unknown",
-                            doc_type=metadata.get('doc_type', file_path.suffix.lstrip('.')) if metadata else "unknown",
-                            language=metadata.get('language', 'unknown') if metadata else "unknown",
-                            num_pages=metadata.get('num_pages') if metadata else None, num_chunks=item.get('num_chunks', 0),
-                            status="failed", start_time=file_start_time, end_time=datetime.now(), session_id=session_id)
-                    except Exception:
-                        pass
 
         except QueueEmpty:
-            if status_mgr and session_id:
-                try:
-                    status_mgr.update_worker_status(session_id, 0, "writer", status="idle")
-                except Exception:
-                    pass
             continue
         except Exception:
             continue
 
-    if status_mgr and session_id:
-        try:
-            status_mgr.update_worker_status(session_id, 0, "writer", status="finished")
-        except Exception:
-            pass
     stats['writer_done'] = True
 
 def _filter_files_by_checkpoint(files: List[Path], stats: Dict, force: bool = False) -> List[Path]:
@@ -374,16 +231,11 @@ def parallel_ingest_documents(source: Path, config: ParallelIngestionConfig = No
     lock = IngestionLock(project_dir)
     if not lock.acquire():
         lock_info = lock.get_lock_info()
-        status_mgr = get_status_manager()
-        active = status_mgr.get_active_session()
-        if active:
-            raise IngestionLockError(f"Ingestion already running (session {active.session_id}). Use 'rag status' to monitor or 'rag stop' to cancel.")
-        elif lock_info:
+        if lock_info:
             raise IngestionLockError(f"Another ingestion process is running (PID {lock_info.get('pid')}). Delete {lock.lock_file} if stale.")
         else:
             raise IngestionLockError("Another ingestion process is running.")
 
-    session_id = None
     cleanup_done = False
     original_sigint = signal.getsignal(signal.SIGINT)
     original_sigterm = signal.getsignal(signal.SIGTERM)
@@ -394,11 +246,6 @@ def parallel_ingest_documents(source: Path, config: ParallelIngestionConfig = No
             return
         cleanup_done = True
         lock.release()
-        if session_id:
-            try:
-                get_status_manager().complete_session(session_id, "interrupted")
-            except Exception:
-                pass
         signal.signal(signal.SIGINT, original_sigint)
         signal.signal(signal.SIGTERM, original_sigterm)
         raise KeyboardInterrupt
@@ -429,28 +276,17 @@ def _parallel_ingest_impl(source: Path, config: ParallelIngestionConfig, progres
         return ParallelIngestionResult(total_files=len(files), processed=0, failed=0, skipped=stats.get('skipped', 0),
             resumed=0, total_chunks=0, duration_seconds=0.0, errors=[])
 
-    session_id = None
-    status_db_path = None
-    try:
-        status_mgr = get_status_manager()
-        status_db_path = status_mgr.db_path
-        session_id = status_mgr.create_session(source_path=str(source), num_workers=config.num_workers,
-            total_files=len(files), skipped_files=stats.get('skipped', 0))
-        set_session_id(session_id)
-    except Exception:
-        pass
-
     for file_path in files_to_process:
         file_queue.put(file_path)
     for _ in range(config.num_workers):
         file_queue.put(None)
 
-    writer = threading.Thread(target=_writer_thread_func, args=(chunk_queue, stats, config.batch_size, session_id, status_db_path), daemon=True)
+    writer = threading.Thread(target=_writer_thread_func, args=(chunk_queue, stats, config.batch_size), daemon=True)
     writer.start()
 
     workers = []
     for i in range(config.num_workers):
-        p = mp.Process(target=_parse_document_worker, args=(i, file_queue, chunk_queue, session_id, status_db_path))
+        p = mp.Process(target=_parse_document_worker, args=(i, file_queue, chunk_queue))
         p.start()
         workers.append(p)
 
@@ -479,12 +315,6 @@ def _parallel_ingest_impl(source: Path, config: ParallelIngestionConfig, progres
     elapsed = time.time() - start_time
     logger.info(f"Completed: {stats['processed']} processed, {stats['failed']} failed, {stats['total_chunks']} chunks in {elapsed/60:.1f} min")
 
-    if session_id:
-        try:
-            get_status_manager().complete_session(session_id, "completed")
-        except Exception:
-            pass
-
     return ParallelIngestionResult(total_files=len(files), processed=stats['processed'], failed=stats['failed'],
         skipped=stats.get('skipped', 0), resumed=stats.get('resumed', 0), total_chunks=stats['total_chunks'],
-        duration_seconds=elapsed, session_id=session_id, errors=list(stats.get('errors', [])))
+        duration_seconds=elapsed, errors=list(stats.get('errors', [])))

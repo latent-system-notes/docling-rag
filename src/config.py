@@ -89,14 +89,11 @@ class Settings(BaseSettings):
     mcp_transport = property(lambda s: MCP_TRANSPORT)
     mcp_host = property(lambda s: MCP_HOST)
     chroma_collection_name = property(lambda s: COLLECTION_NAME)
-    mcp_enable_cleanup = property(lambda s: True)
-    mcp_metrics_enabled = property(lambda s: True)
     offline_mode = property(lambda s: True)
     chroma_mode = property(lambda s: "persistent")
     language_detection_enabled = property(lambda s: True)
     log_level = property(lambda s: "INFO")
     checkpoint_retention_days = property(lambda s: 7)
-    mcp_metrics_retention_days = property(lambda s: 7)
 
 settings = Settings()
 
@@ -111,15 +108,6 @@ def get_project_paths():
 
 def apply_project_settings():
     return get_project_paths() is not None
-
-_session_id = None
-
-def set_session_id(session_id):
-    global _session_id
-    _session_id = session_id
-
-def get_session_id():
-    return _session_id
 
 def get_logger(name):
     logger = logging.getLogger(name)
