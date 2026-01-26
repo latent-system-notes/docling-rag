@@ -182,13 +182,21 @@ except ImportError:
     pass
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="RAG_", case_sensitive=False)
+class InfrastructureSettings(BaseSettings):
+    """Infrastructure settings that are truly global and should NOT vary per project.
 
+    These settings are read from environment variables with RAG_ prefix.
+    Project-specific settings are handled by EffectiveSettings class.
+    """
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="RAG_",
+        case_sensitive=False,
+        extra="ignore"  # Ignore removed env vars (RAG_ENABLE_OCR, etc.)
+    )
+
+    # === Global Infrastructure Settings ===
     models_dir: Path = Path("./models")
-
-    chroma_persist_dir: Path = Path("./data/chroma")
-    chroma_collection_name: str = "documents"
 
     # Checkpoint directory for resumable ingestion
     checkpoint_dir: Path = Path("./data/checkpoints")
@@ -203,36 +211,26 @@ class Settings(BaseSettings):
     chroma_server_ssl: bool = False
     chroma_server_api_key: str = ""  # Optional: for authentication
 
-    embedding_model: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    # Performance tuning
     embedding_batch_size: int = 32
-
-    chunking_method: ChunkingMethod = "hybrid"
-    max_tokens: int = 512
-
-    enable_ocr: bool = True
-    enable_asr: bool = True
-    ocr_languages: str = "eng+ara"
-    ocr_engine: str = "auto"  # auto, rapidocr, easyocr, tesseract, ocrmac
 
     # Offline mode - prevents any network access for model downloads
     # Set to False only when running 'rag models --download'
     offline_mode: bool = True
 
-    default_top_k: int = 5
+    # Feature flags
+    language_detection_enabled: bool = True
 
-    # MCP Server Configuration
-    mcp_server_name: str = "docling-rag"
-    mcp_transport: str = "streamable-http"
-    mcp_host: str = "0.0.0.0"
-    mcp_port: int = 8080
-    mcp_instructions: str = "You are a RAG (Retrieval-Augmented Generation) assistant with access to indexed documents. Use query_rag to retrieve relevant context and list_all_documents to browse available documents."
-    mcp_enable_cleanup: bool = True
+    # Device - system-wide default (project can override)
+    device: Device = "cpu"
 
-    # MCP Monitoring Configuration
+    # MCP Monitoring Configuration (global)
     mcp_metrics_enabled: bool = True
     mcp_metrics_retention_days: int = 7
 
-    # MCP Tool Descriptions
+    # MCP Tool Descriptions (global - same for all projects)
+    mcp_instructions: str = "You are a RAG (Retrieval-Augmented Generation) assistant with access to indexed documents. Use query_rag to retrieve relevant context and list_all_documents to browse available documents."
+
     mcp_tool_query_description: str = """Query the RAG system to retrieve relevant document chunks based on semantic similarity.
 
 Args:
@@ -279,13 +277,291 @@ Examples:
     list_all_documents(limit=20)      # Get first 20
     list_all_documents(limit=20, offset=20)  # Get next 20 (page 2)"""
 
-    language_detection_enabled: bool = True
 
-    device: Device = "cpu"
-    log_level: str = "INFO"
+# Global infrastructure settings instance
+_infra_settings = InfrastructureSettings()
 
 
-settings = Settings()
+class EffectiveSettings:
+    """Unified settings: project config > env vars > defaults.
+
+    This class provides a single source of truth for all settings.
+    Project-specific settings are read from the active project.
+    Infrastructure settings are read from environment variables.
+
+    Usage:
+        from src.config import settings
+        print(settings.enable_ocr)  # Reads from project or default
+        print(settings.models_dir)  # Reads from infrastructure settings
+    """
+
+    def __init__(self):
+        self._project_cache = None
+        self._project_cache_valid = False
+
+    def _get_project(self) -> dict | None:
+        """Get active project settings (cached)."""
+        if not self._project_cache_valid:
+            self._project_cache = get_active_project_settings()
+            self._project_cache_valid = True
+        return self._project_cache
+
+    def invalidate_cache(self):
+        """Call after switching projects to refresh settings."""
+        self._project_cache_valid = False
+        self._project_cache = None
+
+    # === Infrastructure Settings (from env vars) ===
+    @property
+    def models_dir(self) -> Path:
+        return _infra_settings.models_dir
+
+    @property
+    def offline_mode(self) -> bool:
+        return _infra_settings.offline_mode
+
+    @property
+    def checkpoint_dir(self) -> Path:
+        return _infra_settings.checkpoint_dir
+
+    @property
+    def checkpoint_retention_days(self) -> int:
+        return _infra_settings.checkpoint_retention_days
+
+    @property
+    def chroma_mode(self) -> str:
+        return _infra_settings.chroma_mode
+
+    @property
+    def chroma_server_host(self) -> str:
+        return _infra_settings.chroma_server_host
+
+    @property
+    def chroma_server_port(self) -> int:
+        return _infra_settings.chroma_server_port
+
+    @property
+    def chroma_server_ssl(self) -> bool:
+        return _infra_settings.chroma_server_ssl
+
+    @property
+    def chroma_server_api_key(self) -> str:
+        return _infra_settings.chroma_server_api_key
+
+    @property
+    def embedding_batch_size(self) -> int:
+        return _infra_settings.embedding_batch_size
+
+    @property
+    def language_detection_enabled(self) -> bool:
+        return _infra_settings.language_detection_enabled
+
+    @property
+    def mcp_metrics_enabled(self) -> bool:
+        return _infra_settings.mcp_metrics_enabled
+
+    @property
+    def mcp_metrics_retention_days(self) -> int:
+        return _infra_settings.mcp_metrics_retention_days
+
+    @property
+    def mcp_instructions(self) -> str:
+        return _infra_settings.mcp_instructions
+
+    @property
+    def mcp_tool_query_description(self) -> str:
+        return _infra_settings.mcp_tool_query_description
+
+    @property
+    def mcp_tool_list_docs_description(self) -> str:
+        return _infra_settings.mcp_tool_list_docs_description
+
+    # === Project Settings (project > default) ===
+    @property
+    def enable_ocr(self) -> bool:
+        project = self._get_project()
+        if project:
+            return project["enable_ocr"]
+        return True  # Default: True
+
+    @property
+    def ocr_engine(self) -> str:
+        project = self._get_project()
+        if project:
+            return project["ocr_engine"]
+        return "auto"  # Default
+
+    @property
+    def ocr_languages(self) -> str:
+        project = self._get_project()
+        if project:
+            return project["ocr_languages"]
+        return "eng+ara"  # Default
+
+    @property
+    def enable_asr(self) -> bool:
+        project = self._get_project()
+        if project:
+            return project["enable_asr"]
+        return True  # Default: True
+
+    @property
+    def embedding_model(self) -> str:
+        project = self._get_project()
+        if project:
+            return project["embedding_model"]
+        return "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"  # Default
+
+    @property
+    def chunking_method(self) -> str:
+        project = self._get_project()
+        if project:
+            return project["chunking_method"]
+        return "hybrid"  # Default
+
+    @property
+    def max_tokens(self) -> int:
+        project = self._get_project()
+        if project:
+            return project["max_tokens"]
+        return 512  # Default
+
+    @property
+    def default_top_k(self) -> int:
+        project = self._get_project()
+        if project:
+            return project["default_top_k"]
+        return 5  # Default
+
+    @property
+    def device(self) -> str:
+        """Device: project config > env var > 'cpu'."""
+        project = self._get_project()
+        if project and project.get("device"):
+            return project["device"]
+        return _infra_settings.device  # Falls back to RAG_DEVICE env var
+
+    @property
+    def log_level(self) -> str:
+        project = self._get_project()
+        if project:
+            return project["log_level"]
+        return "INFO"  # Default
+
+    # === MCP Project Settings ===
+    @property
+    def mcp_server_name(self) -> str:
+        project = self._get_project()
+        if project:
+            return project["mcp_server_name"]
+        return "docling-rag"  # Default
+
+    @property
+    def mcp_transport(self) -> str:
+        project = self._get_project()
+        if project:
+            return project["mcp_transport"]
+        return "streamable-http"  # Default
+
+    @property
+    def mcp_host(self) -> str:
+        project = self._get_project()
+        if project:
+            return project["mcp_host"]
+        return "0.0.0.0"  # Default
+
+    @property
+    def mcp_port(self) -> int:
+        project = self._get_project()
+        if project:
+            return project["port"]
+        return 8080  # Default
+
+    @property
+    def mcp_enable_cleanup(self) -> bool:
+        project = self._get_project()
+        if project:
+            return project["mcp_enable_cleanup"]
+        return True  # Default
+
+    # === Path Settings (project > default) ===
+    @property
+    def chroma_persist_dir(self) -> Path:
+        project = self._get_project()
+        if project:
+            return Path(project["chroma_persist_dir"])
+        return Path("./data/chroma")  # Default
+
+    @property
+    def chroma_collection_name(self) -> str:
+        return "documents"  # Always the same
+
+    # === Utility Methods ===
+    def model_dump(self) -> dict:
+        """Return all settings as a dictionary (for compatibility)."""
+        return {
+            # Infrastructure
+            "models_dir": self.models_dir,
+            "offline_mode": self.offline_mode,
+            "checkpoint_dir": self.checkpoint_dir,
+            "checkpoint_retention_days": self.checkpoint_retention_days,
+            "chroma_mode": self.chroma_mode,
+            "chroma_server_host": self.chroma_server_host,
+            "chroma_server_port": self.chroma_server_port,
+            "chroma_server_ssl": self.chroma_server_ssl,
+            "chroma_server_api_key": self.chroma_server_api_key,
+            "embedding_batch_size": self.embedding_batch_size,
+            "language_detection_enabled": self.language_detection_enabled,
+            "mcp_metrics_enabled": self.mcp_metrics_enabled,
+            "mcp_metrics_retention_days": self.mcp_metrics_retention_days,
+            "mcp_instructions": self.mcp_instructions,
+            "mcp_tool_query_description": self.mcp_tool_query_description,
+            "mcp_tool_list_docs_description": self.mcp_tool_list_docs_description,
+            # Project-specific
+            "enable_ocr": self.enable_ocr,
+            "ocr_engine": self.ocr_engine,
+            "ocr_languages": self.ocr_languages,
+            "enable_asr": self.enable_asr,
+            "embedding_model": self.embedding_model,
+            "chunking_method": self.chunking_method,
+            "max_tokens": self.max_tokens,
+            "default_top_k": self.default_top_k,
+            "device": self.device,
+            "log_level": self.log_level,
+            "mcp_server_name": self.mcp_server_name,
+            "mcp_transport": self.mcp_transport,
+            "mcp_host": self.mcp_host,
+            "mcp_port": self.mcp_port,
+            "mcp_enable_cleanup": self.mcp_enable_cleanup,
+            "chroma_persist_dir": self.chroma_persist_dir,
+            "chroma_collection_name": self.chroma_collection_name,
+        }
+
+    def get_setting_source(self, key: str) -> str:
+        """Return the source of a setting value ('project', 'env', or 'default')."""
+        infrastructure_keys = {
+            "models_dir", "offline_mode", "checkpoint_dir", "checkpoint_retention_days",
+            "chroma_mode", "chroma_server_host", "chroma_server_port", "chroma_server_ssl",
+            "chroma_server_api_key", "embedding_batch_size", "language_detection_enabled",
+            "mcp_metrics_enabled", "mcp_metrics_retention_days", "mcp_instructions",
+            "mcp_tool_query_description", "mcp_tool_list_docs_description",
+        }
+
+        if key in infrastructure_keys:
+            return "env"
+
+        project = self._get_project()
+        if project:
+            return "project"
+
+        return "default"
+
+
+# Create the effective settings instance
+effective_settings = EffectiveSettings()
+
+# Backward compatibility alias
+settings = effective_settings
 
 
 # ============================================================================
@@ -338,49 +614,21 @@ def get_active_project_settings() -> dict | None:
 
 
 def apply_project_settings() -> bool:
-    """Apply active project settings to the global settings.
+    """Check if an active project exists and invalidate settings cache.
+
+    This function is kept for backward compatibility. With EffectiveSettings,
+    project settings are read dynamically, so this just invalidates the cache
+    and returns whether a project is active.
 
     Returns:
-        True if project settings were applied, False otherwise
+        True if an active project exists, False otherwise
     """
-    global settings
+    # Invalidate cache to ensure fresh project settings are read
+    effective_settings.invalidate_cache()
 
+    # Check if there's an active project
     project = get_active_project_settings()
-    if not project:
-        return False
-
-    # Override ALL settings with project values
-    # Paths
-    settings.chroma_persist_dir = project["chroma_persist_dir"]
-
-    # Document Processing
-    settings.enable_ocr = project["enable_ocr"]
-    settings.ocr_engine = project["ocr_engine"]
-    settings.ocr_languages = project["ocr_languages"]
-    settings.enable_asr = project["enable_asr"]
-
-    # Embedding & Chunking
-    settings.embedding_model = project["embedding_model"]
-    settings.chunking_method = project["chunking_method"]
-    settings.max_tokens = project["max_tokens"]
-
-    # Retrieval
-    settings.default_top_k = project["default_top_k"]
-
-    # MCP Server
-    settings.mcp_port = project["port"]
-    settings.mcp_server_name = project["mcp_server_name"]
-    settings.mcp_transport = project["mcp_transport"]
-    settings.mcp_host = project["mcp_host"]
-    settings.mcp_enable_cleanup = project["mcp_enable_cleanup"]
-
-    # Device
-    settings.device = project["device"]
-
-    # Logging
-    settings.log_level = project["log_level"]
-
-    return True
+    return project is not None
 
 
 # ============================================================================

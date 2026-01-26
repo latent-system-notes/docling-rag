@@ -36,7 +36,7 @@ class ProjectConfig:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     # Document Processing
-    enable_ocr: bool = False
+    enable_ocr: bool = True  # Default: True (matches user expectations)
     ocr_engine: str = "auto"  # auto, rapidocr, easyocr, tesseract
     ocr_languages: str = "eng+ara"
     enable_asr: bool = True
@@ -148,7 +148,7 @@ class ProjectManager:
         db_path: Optional[str] = None,
         docs_path: Optional[str] = None,
         # Document Processing
-        enable_ocr: bool = False,
+        enable_ocr: bool = True,  # Default: True (matches user expectations)
         ocr_engine: str = "auto",
         ocr_languages: str = "eng+ara",
         enable_asr: bool = True,

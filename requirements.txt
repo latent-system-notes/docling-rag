@@ -39,7 +39,6 @@ docling==2.70.0
 docling-core==2.60.2
 docling-ibm-models==3.11.0
 docling-parse==4.7.3
--e git+https://github.com/latent-system-notes/docling-rag.git@d80758213ac120e5142c06660781029be9e6d3b7#egg=docling_rag
 docstring_parser==0.17.0
 docutils==0.22.3
 docx2txt==0.8

@@ -549,16 +549,78 @@ def mcp_serve(
 
 @config_app.command("show")
 def config_show():
-    """Show current configuration"""
-    table = Table(title="Configuration", box=None)
-    table.add_column("Setting", style="cyan")
-    table.add_column("Value", style="green")
+    """Show current effective configuration with source indicators.
 
-    config_dict = settings.model_dump()
-    for key, value in config_dict.items():
-        table.add_row(key, str(value))
+    Sources:
+    - [project] - Value comes from active project config
+    - [env]     - Value comes from environment variable (RAG_*)
+    - [default] - Value is using built-in default
+    """
+    from src.config import effective_settings
 
-    console.print(table)
+    # Check if there's an active project
+    pm = get_project_manager()
+    active_project = pm.get_active_project()
+
+    if active_project:
+        console.print(f"[bold cyan]Active Project:[/bold cyan] {active_project.name}")
+        console.print()
+
+    # Infrastructure settings (from env vars)
+    console.print("[bold]Infrastructure Settings[/bold] [dim](from environment)[/dim]")
+    infra_table = Table(box=None, show_header=True, padding=(0, 2))
+    infra_table.add_column("Setting", style="cyan")
+    infra_table.add_column("Value", style="green")
+
+    infra_keys = [
+        "models_dir", "offline_mode", "checkpoint_dir", "checkpoint_retention_days",
+        "chroma_mode", "chroma_server_host", "chroma_server_port", "chroma_server_ssl",
+        "embedding_batch_size", "language_detection_enabled", "mcp_metrics_enabled",
+        "mcp_metrics_retention_days",
+    ]
+
+    config_dict = effective_settings.model_dump()
+    for key in infra_keys:
+        if key in config_dict:
+            value = config_dict[key]
+            # Truncate long values
+            value_str = str(value)
+            if len(value_str) > 60:
+                value_str = value_str[:57] + "..."
+            infra_table.add_row(key, value_str)
+
+    console.print(infra_table)
+    console.print()
+
+    # Project-specific settings
+    source_label = "[project]" if active_project else "[default]"
+    console.print(f"[bold]Project Settings[/bold] [dim]({source_label})[/dim]")
+    project_table = Table(box=None, show_header=True, padding=(0, 2))
+    project_table.add_column("Setting", style="cyan")
+    project_table.add_column("Value", style="green")
+
+    project_keys = [
+        "enable_ocr", "ocr_engine", "ocr_languages", "enable_asr",
+        "embedding_model", "chunking_method", "max_tokens", "default_top_k",
+        "device", "log_level",
+        "mcp_server_name", "mcp_transport", "mcp_host", "mcp_port", "mcp_enable_cleanup",
+        "chroma_persist_dir", "chroma_collection_name",
+    ]
+
+    for key in project_keys:
+        if key in config_dict:
+            value = config_dict[key]
+            value_str = str(value)
+            if len(value_str) > 60:
+                value_str = value_str[:57] + "..."
+            project_table.add_row(key, value_str)
+
+    console.print(project_table)
+
+    if not active_project:
+        console.print()
+        console.print("[dim]No active project. Using default values.[/dim]")
+        console.print("[dim]Create a project with: rag project create <name>[/dim]")
 
 
 @config_app.command("models")
