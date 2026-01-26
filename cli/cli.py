@@ -315,12 +315,12 @@ def ingest(
         if active_project:
             console.print(f"[dim]Project: {active_project.name}[/dim]")
 
-    # Resolve path: use provided path or fall back to project's docs_path
+    # Resolve path: use provided path or fall back to project's docs_dir
     if path is None:
         if active_project:
-            # Use project's configured docs_path
+            # Use project's configured docs_dir
             paths = pm.get_project_paths(active_project.name)
-            file_path = paths["docs_path"]
+            file_path = paths["docs_dir"]
             console.print(f"[dim]Using project docs folder: {file_path}[/dim]")
         else:
             console.print("[red]Error: No path provided and no active project.[/red]")
@@ -334,7 +334,7 @@ def ingest(
         # Optionally save this path as the project's docs folder
         if save_path and active_project:
             abs_path = file_path.absolute()
-            pm.update_project(active_project.name, docs_path=str(abs_path))
+            pm.update_project(active_project.name, docs_dir=str(abs_path))
             console.print(f"[dim]Saved as project docs folder: {abs_path}[/dim]")
 
     initialize_collections()
@@ -549,78 +549,47 @@ def mcp_serve(
 
 @config_app.command("show")
 def config_show():
-    """Show current effective configuration with source indicators.
+    """Show current effective configuration.
 
-    Sources:
-    - [project] - Value comes from active project config
-    - [env]     - Value comes from environment variable (RAG_*)
-    - [default] - Value is using built-in default
+    Displays:
+    - Active project info (name, port, paths)
+    - Device setting (only env var: RAG_DEVICE)
+    - Hardcoded defaults
     """
-    from src.config import effective_settings
-
-    # Check if there's an active project
     pm = get_project_manager()
     active_project = pm.get_active_project()
 
+    # Active Project Info
     if active_project:
-        console.print(f"[bold cyan]Active Project:[/bold cyan] {active_project.name}")
+        paths = pm.get_project_paths(active_project.name)
+        console.print("[bold]Active Project[/bold]")
+        proj_table = Table(box=None, show_header=True, padding=(0, 2))
+        proj_table.add_column("Setting", style="cyan")
+        proj_table.add_column("Value", style="green")
+        proj_table.add_row("Name", active_project.name)
+        proj_table.add_row("Port", str(active_project.port))
+        proj_table.add_row("MCP Server", active_project.mcp_server_name)
+        proj_table.add_row("Data Directory", str(paths["data_dir"]))
+        proj_table.add_row("Docs Directory", str(paths["docs_dir"]))
+        console.print(proj_table)
+        console.print()
+    else:
+        console.print("[yellow]No active project.[/yellow]")
+        console.print("[dim]Create a project with: rag project create <name>[/dim]")
         console.print()
 
-    # Infrastructure settings (from env vars)
-    console.print("[bold]Infrastructure Settings[/bold] [dim](from environment)[/dim]")
-    infra_table = Table(box=None, show_header=True, padding=(0, 2))
-    infra_table.add_column("Setting", style="cyan")
-    infra_table.add_column("Value", style="green")
-
-    infra_keys = [
-        "models_dir", "offline_mode", "checkpoint_dir", "checkpoint_retention_days",
-        "chroma_mode", "chroma_server_host", "chroma_server_port", "chroma_server_ssl",
-        "embedding_batch_size", "language_detection_enabled", "mcp_metrics_enabled",
-        "mcp_metrics_retention_days",
-    ]
-
-    config_dict = effective_settings.model_dump()
-    for key in infra_keys:
-        if key in config_dict:
-            value = config_dict[key]
-            # Truncate long values
-            value_str = str(value)
-            if len(value_str) > 60:
-                value_str = value_str[:57] + "..."
-            infra_table.add_row(key, value_str)
-
-    console.print(infra_table)
+    # Device (only env setting)
+    console.print(f"[bold]Device:[/bold] {settings.device} [dim](RAG_DEVICE env var)[/dim]")
     console.print()
 
-    # Project-specific settings
-    source_label = "[project]" if active_project else "[default]"
-    console.print(f"[bold]Project Settings[/bold] [dim]({source_label})[/dim]")
-    project_table = Table(box=None, show_header=True, padding=(0, 2))
-    project_table.add_column("Setting", style="cyan")
-    project_table.add_column("Value", style="green")
-
-    project_keys = [
-        "enable_ocr", "ocr_engine", "ocr_languages", "enable_asr",
-        "embedding_model", "chunking_method", "max_tokens", "default_top_k",
-        "device", "log_level",
-        "mcp_server_name", "mcp_transport", "mcp_host", "mcp_port", "mcp_enable_cleanup",
-        "chroma_persist_dir", "chroma_collection_name",
-    ]
-
-    for key in project_keys:
-        if key in config_dict:
-            value = config_dict[key]
-            value_str = str(value)
-            if len(value_str) > 60:
-                value_str = value_str[:57] + "..."
-            project_table.add_row(key, value_str)
-
-    console.print(project_table)
-
-    if not active_project:
-        console.print()
-        console.print("[dim]No active project. Using default values.[/dim]")
-        console.print("[dim]Create a project with: rag project create <name>[/dim]")
+    # Hardcoded paths
+    console.print("[bold]Paths[/bold] [dim](hardcoded)[/dim]")
+    paths_table = Table(box=None, show_header=True, padding=(0, 2))
+    paths_table.add_column("Setting", style="cyan")
+    paths_table.add_column("Value", style="dim")
+    paths_table.add_row("models_dir", str(settings.models_dir))
+    paths_table.add_row("checkpoint_dir", str(settings.checkpoint_dir))
+    console.print(paths_table)
 
 
 @config_app.command("models")
@@ -1736,40 +1705,24 @@ app.add_typer(mcp_app, name="mcp")
 def project_create(
     name: str = typer.Argument(..., help="Project name"),
     port: int = typer.Option(9090, "--port", "-p", help="MCP server port"),
-    description: str = typer.Option("", "--description", "-d", help="Project description"),
-    device: str = typer.Option("cpu", "--device", help="Compute device (cpu, cuda, mps, auto)"),
-    database: str = typer.Option(None, "--database", "--db", help="Custom database path (absolute or relative)"),
-    documents: str = typer.Option(None, "--documents", "--docs", help="Custom documents folder path"),
-    # Document Processing
-    ocr: bool = typer.Option(False, "--ocr", help="Enable OCR for image-based PDFs"),
-    ocr_engine: str = typer.Option("auto", "--ocr-engine", help="OCR engine (auto, rapidocr, easyocr, tesseract)"),
-    ocr_languages: str = typer.Option("eng+ara", "--ocr-languages", help="OCR languages (e.g., eng+ara)"),
-    asr: bool = typer.Option(True, "--asr/--no-asr", help="Enable audio transcription"),
-    # Embedding & Chunking
-    embedding_model: str = typer.Option(None, "--embedding-model", help="Embedding model name"),
-    chunking_method: str = typer.Option("hybrid", "--chunking-method", help="Chunking method (hybrid, semantic, fixed)"),
-    max_tokens: int = typer.Option(512, "--max-tokens", help="Max tokens per chunk"),
-    # Retrieval
-    top_k: int = typer.Option(5, "--top-k", help="Default number of results"),
-    # MCP Server
-    mcp_name: str = typer.Option(None, "--mcp-name", help="MCP server name"),
-    mcp_transport: str = typer.Option("streamable-http", "--mcp-transport", help="MCP transport protocol"),
-    mcp_host: str = typer.Option("0.0.0.0", "--mcp-host", help="MCP bind host"),
-    mcp_cleanup: bool = typer.Option(True, "--mcp-cleanup/--no-mcp-cleanup", help="Enable cleanup on shutdown"),
-    # Logging
-    log_level: str = typer.Option("INFO", "--log-level", help="Logging level (DEBUG, INFO, WARNING, ERROR)"),
+    data_dir: str = typer.Option(None, "--data-dir", "--data", help="Custom data path (absolute or relative)"),
+    docs_dir: str = typer.Option(None, "--docs-dir", "--docs", help="Custom documents folder path"),
 ):
     """Create a new RAG project.
 
-    By default, database and documents are stored in ~/.rag/projects/<name>/
-    Use --database and --documents to specify custom locations.
+    Only 4 settings are configurable per project:
+    - name: Project identifier
+    - port: MCP server port (must be unique)
+    - data_dir: Directory for ChromaDB + BM25 (default: data)
+    - docs_dir: Document source directory (default: docs)
+
+    Everything else (OCR, embedding model, etc.) uses hardcoded defaults
+    or environment variables.
 
     Examples:
         rag project create my-docs
-        rag project create safety-docs --port 9091 --description "Safety documentation"
-        rag project create ml-papers --device cuda --ocr
-        rag project create work --database D:/rag-data --documents D:/work-docs
-        rag project create research --embedding-model all-MiniLM-L6-v2 --max-tokens 256
+        rag project create safety-docs --port 9091
+        rag project create work --data-dir D:/rag-data --docs-dir D:/work-docs
     """
     pm = get_project_manager()
 
@@ -1777,28 +1730,8 @@ def project_create(
         config = pm.create_project(
             name=name,
             port=port,
-            description=description,
-            device=device,
-            db_path=database,
-            docs_path=documents,
-            # Document Processing
-            enable_ocr=ocr,
-            ocr_engine=ocr_engine,
-            ocr_languages=ocr_languages,
-            enable_asr=asr,
-            # Embedding & Chunking
-            embedding_model=embedding_model,
-            chunking_method=chunking_method,
-            max_tokens=max_tokens,
-            # Retrieval
-            default_top_k=top_k,
-            # MCP Server
-            mcp_server_name=mcp_name,
-            mcp_transport=mcp_transport,
-            mcp_host=mcp_host,
-            mcp_enable_cleanup=mcp_cleanup,
-            # Logging
-            log_level=log_level,
+            data_dir=data_dir,
+            docs_dir=docs_dir,
             switch_to=True
         )
 
@@ -1807,21 +1740,16 @@ def project_create(
 
         paths = pm.get_project_paths(name)
 
-        # Basic settings
+        # Show configuration
         table = Table(title="Configuration", box=box.SIMPLE)
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="white")
 
         table.add_row("Name", config.name)
         table.add_row("Port", str(config.port))
-        table.add_row("Device", config.device)
-        table.add_row("Database", str(paths["db_path"]))
-        table.add_row("Documents", str(paths["docs_path"]))
-        table.add_row("OCR", "Enabled" if config.enable_ocr else "Disabled")
-        table.add_row("Embedding", config.embedding_model)
-        table.add_row("Chunking", f"{config.chunking_method} ({config.max_tokens} tokens)")
-        if config.description:
-            table.add_row("Description", config.description)
+        table.add_row("MCP Server", config.mcp_server_name)
+        table.add_row("Data Directory", str(paths["data_dir"]))
+        table.add_row("Docs Directory", str(paths["docs_dir"]))
 
         console.print(table)
         console.print()
@@ -1838,7 +1766,7 @@ def project_create(
 def project_list():
     """List all RAG projects.
 
-    Shows all projects with their port, device, and status.
+    Shows all projects with their port and MCP server name.
     """
     pm = get_project_manager()
     projects = pm.list_projects()
@@ -1854,8 +1782,7 @@ def project_list():
     table.add_column("", width=2)
     table.add_column("Name", style="cyan")
     table.add_column("Port", style="white")
-    table.add_column("Device", style="white")
-    table.add_column("Description", style="dim")
+    table.add_column("MCP Server", style="white")
 
     for project in projects:
         is_active = project.name == active_name
@@ -1866,8 +1793,7 @@ def project_list():
             marker,
             f"[{name_style}]{project.name}[/{name_style}]",
             str(project.port),
-            project.device,
-            project.description[:40] + "..." if len(project.description) > 40 else project.description
+            project.mcp_server_name,
         )
 
     console.print(table)
@@ -1889,7 +1815,7 @@ def project_switch(
     try:
         config = pm.switch_project(name)
         console.print(f"[green]Switched to project '{name}'[/green]")
-        console.print(f"[dim]Port: {config.port} | Device: {config.device}[/dim]")
+        console.print(f"[dim]Port: {config.port} | MCP Server: {config.mcp_server_name}[/dim]")
 
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -1899,38 +1825,23 @@ def project_switch(
 @project_app.command("config")
 def project_config(
     port: int = typer.Option(None, "--port", "-p", help="Set MCP server port"),
-    device: str = typer.Option(None, "--device", help="Set compute device"),
-    description: str = typer.Option(None, "--description", "-d", help="Set description"),
-    database: str = typer.Option(None, "--database", "--db", help="Set database path (absolute or relative)"),
-    documents: str = typer.Option(None, "--documents", "--docs", help="Set documents folder path"),
-    # Document Processing
-    ocr: bool = typer.Option(None, "--ocr/--no-ocr", help="Enable/disable OCR"),
-    ocr_engine: str = typer.Option(None, "--ocr-engine", help="OCR engine (auto, rapidocr, easyocr, tesseract)"),
-    ocr_languages: str = typer.Option(None, "--ocr-languages", help="OCR languages (e.g., eng+ara)"),
-    asr: bool = typer.Option(None, "--asr/--no-asr", help="Enable/disable audio transcription"),
-    # Embedding & Chunking
-    embedding_model: str = typer.Option(None, "--embedding-model", help="Embedding model name"),
-    chunking_method: str = typer.Option(None, "--chunking-method", help="Chunking method (hybrid, semantic, fixed)"),
-    max_tokens: int = typer.Option(None, "--max-tokens", help="Max tokens per chunk"),
-    # Retrieval
-    top_k: int = typer.Option(None, "--top-k", help="Default number of results"),
-    # MCP Server
-    mcp_name: str = typer.Option(None, "--mcp-name", help="MCP server name"),
-    mcp_transport: str = typer.Option(None, "--mcp-transport", help="MCP transport protocol"),
-    mcp_host: str = typer.Option(None, "--mcp-host", help="MCP bind host"),
-    mcp_cleanup: bool = typer.Option(None, "--mcp-cleanup/--no-mcp-cleanup", help="Enable/disable cleanup on shutdown"),
-    # Logging
-    log_level: str = typer.Option(None, "--log-level", help="Logging level (DEBUG, INFO, WARNING, ERROR)"),
+    data_dir: str = typer.Option(None, "--data-dir", "--data", help="Set data directory path"),
+    docs_dir: str = typer.Option(None, "--docs-dir", "--docs", help="Set documents directory path"),
 ):
     """View or update current project configuration.
+
+    Only 4 settings are configurable per project:
+    - name: Project identifier (immutable after creation)
+    - port: MCP server port
+    - data_dir: Directory for ChromaDB + BM25
+    - docs_dir: Document source directory
+
+    mcp_server_name is derived as 'rag-{project_name}' and is not configurable.
 
     Examples:
         rag project config                         # View current config
         rag project config --port 9091             # Change port
-        rag project config --device cuda           # Change device
-        rag project config --database D:/rag-data  # Change database location
-        rag project config --embedding-model all-MiniLM-L6-v2  # Change embedding model
-        rag project config --max-tokens 256        # Change chunk size
+        rag project config --data-dir D:/rag-data  # Change data location
     """
     pm = get_project_manager()
     active = pm.get_active_project()
@@ -1941,41 +1852,15 @@ def project_config(
         raise typer.Exit(1)
 
     # Check if any updates requested
-    has_updates = any(x is not None for x in [
-        port, device, description, database, documents,
-        ocr, ocr_engine, ocr_languages, asr,
-        embedding_model, chunking_method, max_tokens,
-        top_k, mcp_name, mcp_transport, mcp_host, mcp_cleanup,
-        log_level
-    ])
+    has_updates = any(x is not None for x in [port, data_dir, docs_dir])
 
     if has_updates:
         try:
             active = pm.update_project(
                 name=active.name,
                 port=port,
-                device=device,
-                description=description,
-                db_path=database,
-                docs_path=documents,
-                # Document Processing
-                enable_ocr=ocr,
-                ocr_engine=ocr_engine,
-                ocr_languages=ocr_languages,
-                enable_asr=asr,
-                # Embedding & Chunking
-                embedding_model=embedding_model,
-                chunking_method=chunking_method,
-                max_tokens=max_tokens,
-                # Retrieval
-                default_top_k=top_k,
-                # MCP Server
-                mcp_server_name=mcp_name,
-                mcp_transport=mcp_transport,
-                mcp_host=mcp_host,
-                mcp_enable_cleanup=mcp_cleanup,
-                # Logging
-                log_level=log_level,
+                data_dir=data_dir,
+                docs_dir=docs_dir,
             )
             console.print(f"[green]Project '{active.name}' updated.[/green]")
             console.print()
@@ -1983,60 +1868,27 @@ def project_config(
             console.print(f"[red]Error: {e}[/red]")
             raise typer.Exit(1)
 
-    # Display current config - organized by category
+    # Display current config
     paths = pm.get_project_paths(active.name)
 
-    # Basic settings
     console.print(f"[bold cyan]Project: {active.name}[/bold cyan]")
     console.print()
 
-    basic_table = Table(title="Basic Settings", box=box.SIMPLE)
-    basic_table.add_column("Setting", style="cyan")
-    basic_table.add_column("Value", style="white")
-    basic_table.add_row("Port", str(active.port))
-    basic_table.add_row("Device", active.device)
-    basic_table.add_row("Description", active.description or "(none)")
-    basic_table.add_row("Created", active.created_at[:19])
-    basic_table.add_row("Log Level", active.log_level)
-    console.print(basic_table)
+    # Project Settings (the 4 configurable fields)
+    proj_table = Table(title="Project Settings", box=box.SIMPLE)
+    proj_table.add_column("Setting", style="cyan")
+    proj_table.add_column("Value", style="white")
+    proj_table.add_row("Name", active.name)
+    proj_table.add_row("Port", str(active.port))
+    proj_table.add_row("MCP Server", active.mcp_server_name)
+    proj_table.add_row("Data Directory", str(paths["data_dir"]))
+    proj_table.add_row("Docs Directory", str(paths["docs_dir"]))
+    proj_table.add_row("Created", active.created_at[:19])
+    console.print(proj_table)
 
-    # Paths
-    paths_table = Table(title="Paths", box=box.SIMPLE)
-    paths_table.add_column("Setting", style="cyan")
-    paths_table.add_column("Value", style="white")
-    paths_table.add_row("Database", str(paths["db_path"]))
-    paths_table.add_row("Documents", str(paths["docs_path"]))
-    console.print(paths_table)
-
-    # Document Processing
-    doc_table = Table(title="Document Processing", box=box.SIMPLE)
-    doc_table.add_column("Setting", style="cyan")
-    doc_table.add_column("Value", style="white")
-    doc_table.add_row("OCR", "Enabled" if active.enable_ocr else "Disabled")
-    doc_table.add_row("OCR Engine", active.ocr_engine)
-    doc_table.add_row("OCR Languages", active.ocr_languages)
-    doc_table.add_row("ASR (Audio)", "Enabled" if active.enable_asr else "Disabled")
-    console.print(doc_table)
-
-    # Embedding & Chunking
-    embed_table = Table(title="Embedding & Chunking", box=box.SIMPLE)
-    embed_table.add_column("Setting", style="cyan")
-    embed_table.add_column("Value", style="white")
-    embed_table.add_row("Embedding Model", active.embedding_model)
-    embed_table.add_row("Chunking Method", active.chunking_method)
-    embed_table.add_row("Max Tokens", str(active.max_tokens))
-    embed_table.add_row("Default Top K", str(active.default_top_k))
-    console.print(embed_table)
-
-    # MCP Server
-    mcp_table = Table(title="MCP Server", box=box.SIMPLE)
-    mcp_table.add_column("Setting", style="cyan")
-    mcp_table.add_column("Value", style="white")
-    mcp_table.add_row("Server Name", active.mcp_server_name)
-    mcp_table.add_row("Transport", active.mcp_transport)
-    mcp_table.add_row("Host", active.mcp_host)
-    mcp_table.add_row("Cleanup", "Enabled" if active.mcp_enable_cleanup else "Disabled")
-    console.print(mcp_table)
+    # Device (only env setting)
+    console.print()
+    console.print(f"[dim]Device: {settings.device} (RAG_DEVICE env var)[/dim]")
 
     # Show stats
     stats = pm.get_project_stats(active.name)
@@ -2110,18 +1962,15 @@ def project_info(
         console.print(" [green](active)[/green]")
     else:
         console.print()
-
-    if config.description:
-        console.print(f"[dim]{config.description}[/dim]")
     console.print()
 
-    # Basic settings
-    basic_table = Table(title="Basic Settings", box=box.SIMPLE, show_header=False)
+    # Project Settings (the 4 configurable fields)
+    basic_table = Table(title="Project Settings", box=box.SIMPLE, show_header=False)
     basic_table.add_column("", style="dim", width=14)
     basic_table.add_column("", style="white")
+    basic_table.add_row("Name", config.name)
     basic_table.add_row("Port", str(config.port))
-    basic_table.add_row("Device", config.device)
-    basic_table.add_row("Log Level", config.log_level)
+    basic_table.add_row("MCP Server", config.mcp_server_name)
     basic_table.add_row("Created", config.created_at[:19])
     console.print(basic_table)
 
@@ -2130,39 +1979,11 @@ def project_info(
     path_table.add_column("", style="dim", width=14)
     path_table.add_column("", style="white")
     path_table.add_row("Project Dir", str(paths["project_dir"]))
-    path_table.add_row("Database", str(paths["db_path"]))
-    path_table.add_row("Documents", str(paths["docs_path"]))
+    path_table.add_row("Data Dir", str(paths["data_dir"]))
+    path_table.add_row("Docs Dir", str(paths["docs_dir"]))
+    path_table.add_row("ChromaDB", str(paths["chroma_path"]))
+    path_table.add_row("BM25 Index", str(paths["bm25_path"]))
     console.print(path_table)
-
-    # Document Processing
-    doc_table = Table(title="Document Processing", box=box.SIMPLE, show_header=False)
-    doc_table.add_column("", style="dim", width=14)
-    doc_table.add_column("", style="white")
-    doc_table.add_row("OCR", "Enabled" if config.enable_ocr else "Disabled")
-    doc_table.add_row("OCR Engine", config.ocr_engine)
-    doc_table.add_row("OCR Languages", config.ocr_languages)
-    doc_table.add_row("ASR (Audio)", "Enabled" if config.enable_asr else "Disabled")
-    console.print(doc_table)
-
-    # Embedding & Chunking
-    embed_table = Table(title="Embedding & Chunking", box=box.SIMPLE, show_header=False)
-    embed_table.add_column("", style="dim", width=14)
-    embed_table.add_column("", style="white")
-    embed_table.add_row("Embedding", config.embedding_model)
-    embed_table.add_row("Chunking", config.chunking_method)
-    embed_table.add_row("Max Tokens", str(config.max_tokens))
-    embed_table.add_row("Default Top K", str(config.default_top_k))
-    console.print(embed_table)
-
-    # MCP Server
-    mcp_table = Table(title="MCP Server", box=box.SIMPLE, show_header=False)
-    mcp_table.add_column("", style="dim", width=14)
-    mcp_table.add_column("", style="white")
-    mcp_table.add_row("Server Name", config.mcp_server_name)
-    mcp_table.add_row("Transport", config.mcp_transport)
-    mcp_table.add_row("Host", config.mcp_host)
-    mcp_table.add_row("Cleanup", "Enabled" if config.mcp_enable_cleanup else "Disabled")
-    console.print(mcp_table)
 
     # Stats
     console.print()
@@ -2173,7 +1994,8 @@ def project_info(
 def init():
     """Initialize RAG system with first-time setup wizard.
 
-    Creates your first project with guided configuration.
+    Creates your first project with simplified configuration.
+    Only 4 settings per project: name, port, data_dir, docs_dir.
     """
     pm = get_project_manager()
 
@@ -2208,21 +2030,6 @@ def init():
         console.print("[red]Invalid port number.[/red]")
         raise typer.Exit(1)
 
-    # Get device
-    console.print()
-    console.print("Select compute device:")
-    console.print("  [cyan]cpu[/cyan]  - CPU only (default, works everywhere)")
-    console.print("  [cyan]cuda[/cyan] - NVIDIA GPU (faster, requires CUDA)")
-    console.print("  [cyan]mps[/cyan]  - Apple Silicon GPU")
-    console.print("  [cyan]auto[/cyan] - Auto-detect best available")
-    device = typer.prompt("Device", default="cpu")
-
-    # Get OCR preference
-    enable_ocr = typer.confirm("Enable OCR for image-based PDFs?", default=False)
-
-    # Get description
-    description = typer.prompt("Description (optional)", default="")
-
     console.print()
 
     # Create project
@@ -2230,9 +2037,6 @@ def init():
         config = pm.create_project(
             name=name,
             port=port,
-            device=device,
-            enable_ocr=enable_ocr,
-            description=description,
             switch_to=True
         )
 
@@ -2244,12 +2048,12 @@ def init():
         console.print("[bold]Your project:[/bold]")
         console.print(f"  Name: [cyan]{config.name}[/cyan]")
         console.print(f"  Port: {config.port}")
-        console.print(f"  Device: {config.device}")
-        console.print(f"  Database: {paths['db_path']}")
-        console.print(f"  Documents: {paths['docs_path']}")
+        console.print(f"  MCP Server: {config.mcp_server_name}")
+        console.print(f"  Data Dir: {paths['data_dir']}")
+        console.print(f"  Docs Dir: {paths['docs_dir']}")
         console.print()
         console.print("[bold]Next steps:[/bold]")
-        console.print(f"  1. Add documents to: [cyan]{paths['docs_path']}[/cyan]")
+        console.print(f"  1. Add documents to: [cyan]{paths['docs_dir']}[/cyan]")
         console.print("  2. Run: [cyan]rag ingestion start[/cyan]")
         console.print("  3. Query: [cyan]rag query \"your question\"[/cyan]")
         console.print("  4. Start server: [cyan]rag mcp serve[/cyan]")

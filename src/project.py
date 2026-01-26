@@ -4,7 +4,6 @@ Supports multiple isolated RAG projects, each with its own:
 - Database (ChromaDB + BM25)
 - MCP server port
 - Document collection
-- Configuration
 """
 import json
 import shutil
@@ -26,52 +25,32 @@ def get_rag_home() -> Path:
 
 @dataclass
 class ProjectConfig:
-    """Configuration for a single RAG project."""
+    """Configuration for a single RAG project.
+
+    Only 4 configurable settings:
+    - name: Project identifier
+    - port: MCP server port (must be unique per project)
+    - data_dir: Directory for ChromaDB + BM25 + logs (relative to project dir)
+    - docs_dir: Document source directory (relative to project dir)
+
+    Everything else is hardcoded in Settings or comes from environment variables.
+    """
     name: str
     port: int = 9090
-    db_path: Optional[str] = None  # None = use default (project_dir/data)
-    docs_path: Optional[str] = None  # None = use default (project_dir/docs)
-    device: str = "cpu"  # cpu, cuda, mps, auto
-    description: str = ""
+    data_dir: str = "data"   # ChromaDB + BM25 + logs (relative to project dir)
+    docs_dir: str = "docs"   # Document source directory (relative to project dir)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    # Document Processing
-    enable_ocr: bool = True  # Default: True (matches user expectations)
-    ocr_engine: str = "auto"  # auto, rapidocr, easyocr, tesseract
-    ocr_languages: str = "eng+ara"
-    enable_asr: bool = True
-
-    # Embedding & Chunking
-    embedding_model: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-    chunking_method: str = "hybrid"  # hybrid, semantic, fixed
-    max_tokens: int = 512
-
-    # Retrieval
-    default_top_k: int = 5
-
-    # MCP Server
-    mcp_server_name: str = "docling-rag"
-    mcp_transport: str = "streamable-http"
-    mcp_host: str = "0.0.0.0"
-    mcp_enable_cleanup: bool = True
-
-    # Logging
-    log_level: str = "INFO"
-
-    def __post_init__(self):
-        """Set default paths if not provided."""
-        if self.db_path is None:
-            self.db_path = "data"  # Relative to project dir
-        if self.docs_path is None:
-            self.docs_path = "docs"  # Relative to project dir
+    @property
+    def mcp_server_name(self) -> str:
+        """MCP server name derived from project name."""
+        return f"rag-{self.name}"
 
 
 @dataclass
 class GlobalConfig:
     """Global RAG configuration."""
     active_project: Optional[str] = None
-    default_port: int = 9090
-    default_device: str = "cpu"
     version: str = "1.0.0"
 
 
@@ -95,7 +74,10 @@ class ProjectManager:
         if self.global_config_path.exists():
             try:
                 data = json.loads(self.global_config_path.read_text(encoding="utf-8"))
-                return GlobalConfig(**data)
+                # Filter to only known fields
+                known_fields = {'active_project', 'version'}
+                filtered_data = {k: v for k, v in data.items() if k in known_fields}
+                return GlobalConfig(**filtered_data)
             except (json.JSONDecodeError, TypeError):
                 pass
         return GlobalConfig()
@@ -121,7 +103,17 @@ class ProjectManager:
         if config_path.exists():
             try:
                 data = json.loads(config_path.read_text(encoding="utf-8"))
-                return ProjectConfig(**data)
+                # Only load the 4 configurable fields + created_at
+                known_fields = {'name', 'port', 'data_dir', 'docs_dir', 'created_at'}
+                filtered_data = {k: v for k, v in data.items() if k in known_fields}
+
+                # Handle migration from old field names
+                if 'db_path' in data and 'data_dir' not in filtered_data:
+                    filtered_data['data_dir'] = data['db_path']
+                if 'docs_path' in data and 'docs_dir' not in filtered_data:
+                    filtered_data['docs_dir'] = data['docs_path']
+
+                return ProjectConfig(**filtered_data)
             except (json.JSONDecodeError, TypeError):
                 pass
         return None
@@ -143,52 +135,17 @@ class ProjectManager:
         self,
         name: str,
         port: int = 9090,
-        description: str = "",
-        device: str = "cpu",
-        db_path: Optional[str] = None,
-        docs_path: Optional[str] = None,
-        # Document Processing
-        enable_ocr: bool = True,  # Default: True (matches user expectations)
-        ocr_engine: str = "auto",
-        ocr_languages: str = "eng+ara",
-        enable_asr: bool = True,
-        # Embedding & Chunking
-        embedding_model: Optional[str] = None,
-        chunking_method: str = "hybrid",
-        max_tokens: int = 512,
-        # Retrieval
-        default_top_k: int = 5,
-        # MCP Server
-        mcp_server_name: Optional[str] = None,
-        mcp_transport: str = "streamable-http",
-        mcp_host: str = "0.0.0.0",
-        mcp_enable_cleanup: bool = True,
-        # Logging
-        log_level: str = "INFO",
+        data_dir: Optional[str] = None,
+        docs_dir: Optional[str] = None,
         switch_to: bool = True
     ) -> ProjectConfig:
         """Create a new project.
 
         Args:
             name: Project name (alphanumeric, hyphens, underscores)
-            port: MCP server port
-            description: Project description
-            device: Compute device (cpu, cuda, mps, auto)
-            db_path: Custom database path (absolute or relative to project dir)
-            docs_path: Custom documents path (absolute or relative to project dir)
-            enable_ocr: Enable OCR for image-based PDFs
-            ocr_engine: OCR engine (auto, rapidocr, easyocr, tesseract)
-            ocr_languages: OCR languages (e.g., eng+ara)
-            enable_asr: Enable audio transcription
-            embedding_model: Embedding model name
-            chunking_method: Chunking method (hybrid, semantic, fixed)
-            max_tokens: Max tokens per chunk
-            default_top_k: Default number of results
-            mcp_server_name: MCP server name
-            mcp_transport: MCP transport protocol
-            mcp_host: MCP bind host
-            mcp_enable_cleanup: Enable cleanup on shutdown
-            log_level: Logging level
+            port: MCP server port (must be unique per project)
+            data_dir: Custom data path (absolute or relative to project dir)
+            docs_dir: Custom documents path (absolute or relative to project dir)
             switch_to: Switch to this project after creation
 
         Returns:
@@ -218,43 +175,24 @@ class ProjectManager:
         config = ProjectConfig(
             name=name,
             port=port,
-            description=description,
-            device=device,
-            enable_ocr=enable_ocr,
-            ocr_engine=ocr_engine,
-            ocr_languages=ocr_languages,
-            enable_asr=enable_asr,
-            embedding_model=embedding_model or "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-            chunking_method=chunking_method,
-            max_tokens=max_tokens,
-            default_top_k=default_top_k,
-            mcp_server_name=mcp_server_name or f"rag-{name}",
-            mcp_transport=mcp_transport,
-            mcp_host=mcp_host,
-            mcp_enable_cleanup=mcp_enable_cleanup,
-            log_level=log_level,
+            data_dir=data_dir or "data",
+            docs_dir=docs_dir or "docs",
         )
-
-        # Override paths if provided
-        if db_path is not None:
-            config.db_path = db_path
-        if docs_path is not None:
-            config.docs_path = docs_path
 
         # Create project directory structure
         project_dir = self._get_project_dir(name)
 
-        # Resolve and create database directory
-        resolved_db_path = Path(config.db_path)
-        if not resolved_db_path.is_absolute():
-            resolved_db_path = project_dir / resolved_db_path
-        (resolved_db_path / "chroma").mkdir(parents=True, exist_ok=True)
+        # Resolve and create data directory
+        resolved_data_dir = Path(config.data_dir)
+        if not resolved_data_dir.is_absolute():
+            resolved_data_dir = project_dir / resolved_data_dir
+        (resolved_data_dir / "chroma").mkdir(parents=True, exist_ok=True)
 
         # Resolve and create documents directory
-        resolved_docs_path = Path(config.docs_path)
-        if not resolved_docs_path.is_absolute():
-            resolved_docs_path = project_dir / resolved_docs_path
-        resolved_docs_path.mkdir(parents=True, exist_ok=True)
+        resolved_docs_dir = Path(config.docs_dir)
+        if not resolved_docs_dir.is_absolute():
+            resolved_docs_dir = project_dir / resolved_docs_dir
+        resolved_docs_dir.mkdir(parents=True, exist_ok=True)
 
         # Save config
         self._save_project_config(config)
@@ -319,51 +257,16 @@ class ProjectManager:
         self,
         name: str,
         port: Optional[int] = None,
-        description: Optional[str] = None,
-        device: Optional[str] = None,
-        db_path: Optional[str] = None,
-        docs_path: Optional[str] = None,
-        # Document Processing
-        enable_ocr: Optional[bool] = None,
-        ocr_engine: Optional[str] = None,
-        ocr_languages: Optional[str] = None,
-        enable_asr: Optional[bool] = None,
-        # Embedding & Chunking
-        embedding_model: Optional[str] = None,
-        chunking_method: Optional[str] = None,
-        max_tokens: Optional[int] = None,
-        # Retrieval
-        default_top_k: Optional[int] = None,
-        # MCP Server
-        mcp_server_name: Optional[str] = None,
-        mcp_transport: Optional[str] = None,
-        mcp_host: Optional[str] = None,
-        mcp_enable_cleanup: Optional[bool] = None,
-        # Logging
-        log_level: Optional[str] = None,
+        data_dir: Optional[str] = None,
+        docs_dir: Optional[str] = None,
     ) -> ProjectConfig:
         """Update project configuration.
 
         Args:
             name: Project name
             port: New port (optional)
-            description: New description (optional)
-            device: New device (optional)
-            db_path: New database path (optional)
-            docs_path: New documents path (optional)
-            enable_ocr: Enable/disable OCR (optional)
-            ocr_engine: OCR engine (optional)
-            ocr_languages: OCR languages (optional)
-            enable_asr: Enable/disable ASR (optional)
-            embedding_model: Embedding model (optional)
-            chunking_method: Chunking method (optional)
-            max_tokens: Max tokens (optional)
-            default_top_k: Default top_k (optional)
-            mcp_server_name: MCP server name (optional)
-            mcp_transport: MCP transport (optional)
-            mcp_host: MCP host (optional)
-            mcp_enable_cleanup: MCP cleanup (optional)
-            log_level: Log level (optional)
+            data_dir: New data directory (optional)
+            docs_dir: New documents directory (optional)
 
         Returns:
             Updated ProjectConfig
@@ -384,51 +287,10 @@ class ProjectManager:
                     )
             config.port = port
 
-        # Basic settings
-        if description is not None:
-            config.description = description
-        if device is not None:
-            config.device = device
-        if db_path is not None:
-            config.db_path = db_path
-        if docs_path is not None:
-            config.docs_path = docs_path
-
-        # Document Processing
-        if enable_ocr is not None:
-            config.enable_ocr = enable_ocr
-        if ocr_engine is not None:
-            config.ocr_engine = ocr_engine
-        if ocr_languages is not None:
-            config.ocr_languages = ocr_languages
-        if enable_asr is not None:
-            config.enable_asr = enable_asr
-
-        # Embedding & Chunking
-        if embedding_model is not None:
-            config.embedding_model = embedding_model
-        if chunking_method is not None:
-            config.chunking_method = chunking_method
-        if max_tokens is not None:
-            config.max_tokens = max_tokens
-
-        # Retrieval
-        if default_top_k is not None:
-            config.default_top_k = default_top_k
-
-        # MCP Server
-        if mcp_server_name is not None:
-            config.mcp_server_name = mcp_server_name
-        if mcp_transport is not None:
-            config.mcp_transport = mcp_transport
-        if mcp_host is not None:
-            config.mcp_host = mcp_host
-        if mcp_enable_cleanup is not None:
-            config.mcp_enable_cleanup = mcp_enable_cleanup
-
-        # Logging
-        if log_level is not None:
-            config.log_level = log_level
+        if data_dir is not None:
+            config.data_dir = data_dir
+        if docs_dir is not None:
+            config.docs_dir = docs_dir
 
         self._save_project_config(config)
         return config
@@ -468,7 +330,7 @@ class ProjectManager:
             name: Project name (default: active project)
 
         Returns:
-            Dict with keys: project_dir, db_path, chroma_path, bm25_path, docs_path
+            Dict with keys: project_dir, data_dir, chroma_path, bm25_path, docs_dir
 
         Raises:
             ValueError: If no project specified and no active project
@@ -485,28 +347,22 @@ class ProjectManager:
 
         project_dir = self._get_project_dir(name)
 
-        # Resolve db_path (relative to project_dir or absolute)
-        if config.db_path:
-            db_path = Path(config.db_path)
-            if not db_path.is_absolute():
-                db_path = project_dir / db_path
-        else:
-            db_path = project_dir / "data"
+        # Resolve data_dir (relative to project_dir or absolute)
+        data_path = Path(config.data_dir)
+        if not data_path.is_absolute():
+            data_path = project_dir / data_path
 
-        # Resolve docs_path
-        if config.docs_path:
-            docs_path = Path(config.docs_path)
-            if not docs_path.is_absolute():
-                docs_path = project_dir / docs_path
-        else:
-            docs_path = project_dir / "docs"
+        # Resolve docs_dir
+        docs_path = Path(config.docs_dir)
+        if not docs_path.is_absolute():
+            docs_path = project_dir / docs_path
 
         return {
             "project_dir": project_dir,
-            "db_path": db_path,
-            "chroma_path": db_path / "chroma",
-            "bm25_path": db_path / "bm25.db",
-            "docs_path": docs_path,
+            "data_dir": data_path,
+            "chroma_path": data_path / "chroma",
+            "bm25_path": data_path / "bm25.db",
+            "docs_dir": docs_path,
         }
 
     def get_project_stats(self, name: Optional[str] = None) -> dict:
@@ -526,14 +382,14 @@ class ProjectManager:
         }
 
         # Count documents in docs folder
-        docs_path = paths["docs_path"]
+        docs_path = paths["docs_dir"]
         if docs_path.exists():
             stats["documents"] = sum(1 for _ in docs_path.rglob("*") if _.is_file())
 
         # Calculate disk usage
-        db_path = paths["db_path"]
-        if db_path.exists():
-            total_size = sum(f.stat().st_size for f in db_path.rglob("*") if f.is_file())
+        data_path = paths["data_dir"]
+        if data_path.exists():
+            total_size = sum(f.stat().st_size for f in data_path.rglob("*") if f.is_file())
             stats["disk_usage_mb"] = round(total_size / (1024 * 1024), 2)
 
         return stats

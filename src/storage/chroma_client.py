@@ -15,13 +15,10 @@ _chroma_client_cache: Optional[chromadb.ClientAPI] = None
 
 
 def get_chroma_client() -> chromadb.ClientAPI:
-    """Get ChromaDB client based on configured mode.
+    """Get ChromaDB persistent client.
 
     Uses manual caching to allow proper resource cleanup.
-
-    Modes:
-    - "persistent": Direct SQLite file access (current behavior)
-    - "http": Connect to remote ChromaDB server (recommended)
+    Always uses persistent mode (SQLite).
     """
     global _chroma_client_cache
 
@@ -29,50 +26,19 @@ def get_chroma_client() -> chromadb.ClientAPI:
     if _chroma_client_cache is not None:
         return _chroma_client_cache
 
-    if settings.chroma_mode == "http":
-        # HTTP Mode - Connect to ChromaDB server
-        logger.info(
-            f"Connecting to ChromaDB server at "
-            f"{'https' if settings.chroma_server_ssl else 'http'}://"
-            f"{settings.chroma_server_host}:{settings.chroma_server_port}"
+    logger.info(f"Connecting to ChromaDB at {settings.chroma_persist_dir}")
+
+    try:
+        settings.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
+
+        client = chromadb.PersistentClient(
+            path=str(settings.chroma_persist_dir),
+            settings=ChromaSettings(anonymized_telemetry=False),
         )
-
-        # Build optional authentication headers
-        headers = None
-        if settings.chroma_server_api_key:
-            headers = {"Authorization": f"Bearer {settings.chroma_server_api_key}"}
-
-        try:
-            client = chromadb.HttpClient(
-                host=settings.chroma_server_host,
-                port=settings.chroma_server_port,
-                ssl=settings.chroma_server_ssl,
-                headers=headers,
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
-            _chroma_client_cache = client
-            return client
-        except Exception as e:
-            raise StorageError(
-                f"Failed to connect to ChromaDB server at "
-                f"{settings.chroma_server_host}:{settings.chroma_server_port}: {e}"
-            ) from e
-
-    else:
-        # Persistent Mode - Direct SQLite file access (current behavior)
-        logger.info(f"Connecting to ChromaDB at {settings.chroma_persist_dir}")
-
-        try:
-            settings.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
-
-            client = chromadb.PersistentClient(
-                path=str(settings.chroma_persist_dir),
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
-            _chroma_client_cache = client
-            return client
-        except Exception as e:
-            raise StorageError(f"Failed to connect to ChromaDB: {e}") from e
+        _chroma_client_cache = client
+        return client
+    except Exception as e:
+        raise StorageError(f"Failed to connect to ChromaDB: {e}") from e
 
 
 def cleanup_chroma_client() -> None:
