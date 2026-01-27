@@ -6,7 +6,7 @@ import chromadb
 import numpy as np
 from chromadb.config import Settings as ChromaSettings
 
-from ..config import CHROMA_PERSIST_DIR, COLLECTION_NAME, EMBEDDING_MODEL, get_logger
+from ..config import get_chroma_persist_dir, COLLECTION_NAME, EMBEDDING_MODEL, get_logger
 from ..models import StorageError
 
 logger = get_logger(__name__)
@@ -17,8 +17,9 @@ def get_chroma_client() -> chromadb.ClientAPI:
     if _chroma_client_cache is not None:
         return _chroma_client_cache
     try:
-        CHROMA_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
-        client = chromadb.PersistentClient(path=str(CHROMA_PERSIST_DIR), settings=ChromaSettings(anonymized_telemetry=False))
+        persist_dir = get_chroma_persist_dir()
+        persist_dir.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(persist_dir), settings=ChromaSettings(anonymized_telemetry=False))
         _chroma_client_cache = client
         return client
     except Exception as e:

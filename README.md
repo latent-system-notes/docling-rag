@@ -1,147 +1,69 @@
-# Docling RAG System
+# Docling RAG
 
-Production-ready RAG system with IBM Docling and ChromaDB.
+A document ingestion and retrieval system using Docling for document processing and ChromaDB for vector storage.
 
-## Features
+## Setup
 
-- **Multi-format document processing**: PDF, DOCX, PPTX, XLSX, HTML, Markdown, images
-- **Advanced chunking**: Docling's HybridChunker for intelligent document segmentation
-- **Hybrid search**: ChromaDB (vector) + BM25 (keyword) with reciprocal rank fusion
-- **Multilingual embeddings**: Support for 50+ languages
-- **Parallel ingestion**: Multi-worker processing for large document sets
-- **Checkpointing**: Resume interrupted ingestion without data loss
-- **MCP server**: Integration with AI assistants (Claude Desktop, etc.)
-- **CPU-only operation**: No GPU/CUDA required
+1. Create a virtual environment and install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Quick Start
+2. Download required models:
+   ```bash
+   rag models --download
+   ```
 
-### Installation
-
-```bash
-# Install dependencies
-uv sync
-
-# Or with pip
-pip install -e .
-```
-
-### Download Models
-
-```bash
-# Download required models (one-time, ~1GB)
-rag models --download
-```
-
-### Ingest Documents
-
-```bash
-# Ingest a single file
-rag ingest document.pdf
-
-# Ingest a folder (parallel processing)
-rag ingest ./documents --workers 4
-
-# Preview without ingesting
-rag ingest ./documents --dry-run
-```
-
-### Query Documents
-
-```bash
-# Query with JSON output (default)
-rag query "What is machine learning?"
-
-# Query with formatted text output
-rag query "Explain the concept" --format text --top-k 10
-```
+3. Create an environment file (e.g., `.env.safety`):
+   ```bash
+   DOCUMENTS_DIR=./docs/my-project
+   DATA_DIR=./data
+   MODELS_DIR=./models
+   ```
 
 ## CLI Commands
 
 ```bash
-rag ingest <path>           # Ingest file or directory
-rag query "question"        # Query documents
-rag list                    # List indexed documents
-rag remove <doc_id>         # Remove a document
-rag stats                   # Show statistics
-rag reset                   # Clear all data
-rag models --download       # Download required models
-rag models --verify         # Verify models exist
-rag mcp                     # Start MCP server
+rag ingest <env>              # Ingest documents from DOCUMENTS_DIR
+rag list <env>                # List indexed documents
+rag query <env> "question"    # Query the knowledge base
+rag remove <env> <doc_id>     # Remove a document
+rag stats <env>               # Show database statistics
+rag reset <env>               # Reset the database
+rag mcp <env>                 # Start MCP server
+rag models --download         # Download models
+rag models --verify           # Verify models are installed
 ```
 
-## MCP Server
+## GPU Acceleration
 
-The system includes an MCP (Model Context Protocol) server for integration with AI assistants.
-
-### Start Server
+By default, the system runs on CPU. To enable GPU acceleration, add to your `.env` file:
 
 ```bash
-rag mcp
-# Server runs on http://0.0.0.0:9090
+# For NVIDIA GPU (CUDA)
+RAG_DEVICE=cuda
+
+# For Apple Silicon (M1/M2/M3)
+RAG_DEVICE=mps
 ```
 
-### Available Tools
+### CUDA Prerequisites
 
-1. **query_rag** - Query documents and retrieve relevant chunks
-   - Parameters: `query_text` (str), `top_k` (int, default=5)
-   - Returns: QueryResult with ranked chunks, scores, and metadata
+1. NVIDIA GPU with CUDA support
+2. CUDA toolkit installed
+3. PyTorch with CUDA support:
+   ```bash
+   pip uninstall torch
+   pip install torch --index-url https://download.pytorch.org/whl/cu121
+   ```
 
-2. **list_all_documents** - Browse indexed documents with pagination
-   - Parameters: `limit` (int, optional), `offset` (int, default=0)
-   - Returns: List of documents with metadata
+### Verify GPU Availability
 
-## Configuration
-
-Environment variables:
-- `RAG_DEVICE`: Processing device (`cpu`, `cuda`, `mps`)
-
-Data is stored in:
-- `./data/chroma` - Vector database
-- `./data/checkpoints` - Ingestion checkpoints
-- `./models` - Downloaded models
-
-## Architecture
-
+```bash
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+python -c "import torch; print(f'MPS available: {torch.backends.mps.is_available()}')"
 ```
-src/
-├── config.py              # Constants + Logger
-├── models.py              # Data models + Exceptions
-├── query.py               # Main query orchestration
-├── utils.py               # Embeddings, language detection
-│
-├── ingestion/             # Document processing
-│   ├── document.py        # Load documents + metadata
-│   ├── chunker.py         # Break docs into chunks
-│   ├── pipeline.py        # Single-file ingestion
-│   ├── parallel_pipeline.py # Multi-worker ingestion
-│   └── checkpoint.py      # Resume interrupted ingestion
-│
-├── storage/               # Data storage
-│   ├── chroma_client.py   # ChromaDB vector store
-│   └── bm25_index.py      # BM25 keyword index
-│
-├── retrieval/             # Search
-│   └── search.py          # Hybrid search (vector + BM25)
-│
-└── mcp/                   # MCP server
-    └── server.py          # FastMCP endpoints
-```
-
-### Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Parallel Ingestion** | Multi-worker document processing for speed |
-| **Checkpointing** | Resume interrupted ingestion without re-processing |
-| **Hybrid Search** | Combines vector similarity with BM25 keyword matching |
 
 ## Supported File Types
 
-- Documents: `.pdf`, `.docx`, `.pptx`, `.xlsx`
-- Text: `.md`, `.html`
-- Images: `.png`, `.jpg`, `.jpeg`, `.tiff`
-- Audio: `.wav`, `.mp3`
-
-## License
-
-MIT
+PDF, DOCX, PPTX, XLSX, HTML, Markdown, PNG, JPG, TIFF, WAV, MP3

@@ -1,15 +1,33 @@
 import fnmatch
 import gc
+import logging
 import os
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 import numpy as np
 from langdetect import LangDetectException, detect
+from rich.console import Console
 
-from .config import device, EMBEDDING_BATCH_SIZE, EMBEDDING_MODEL, MODELS_DIR, get_logger
+from .config import device, config, EMBEDDING_BATCH_SIZE, EMBEDDING_MODEL, get_logger
+
+_console = Console()
+
+@contextmanager
+def _quiet_logging():
+    """Temporarily suppress all verbose logs for clean spinner display."""
+    import warnings
+    old_filter = warnings.filters[:]
+    old_disable = logging.root.manager.disable
+    logging.disable(logging.WARNING)  # Globally disable INFO and below
+    warnings.filterwarnings("ignore")
+    try:
+        yield
+    finally:
+        logging.disable(old_disable)
+        warnings.filters[:] = old_filter
 from .models import EmbeddingError
 
 logger = get_logger(__name__)
@@ -28,7 +46,6 @@ def get_embedder():
     if _embedder_cache is not None:
         return _embedder_cache
 
-    import warnings
     from sentence_transformers import SentenceTransformer
 
     local_path = get_model_paths()["embedding"]
@@ -36,8 +53,7 @@ def get_embedder():
         raise EmbeddingError(f"Embedding model not found at {local_path}. Run 'rag models --download' first.")
 
     logger.info(f"Loading embedding model from {local_path}")
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message=".*incorrect regex pattern.*fix_mistral_regex.*")
+    with _quiet_logging(), _console.status("Loading embedding model..."):
         model = SentenceTransformer(str(local_path), device=device, local_files_only=True, trust_remote_code=False)
     _embedder_cache = model
     return model
@@ -65,10 +81,11 @@ def embed(texts: str | list[str], show_progress: bool = False) -> np.ndarray:
         raise EmbeddingError(f"Failed to generate embeddings: {e}") from e
 
 def get_model_paths() -> dict[str, Path]:
+    models_dir = config("MODELS_DIR")
     embedding_name = EMBEDDING_MODEL.split("/")[-1]
     return {
-        "embedding": MODELS_DIR / "embedding" / embedding_name,
-        "docling_layout": Path(os.environ.get("HF_HOME", "./models/.cache")) / "hub"
+        "embedding": models_dir / "embedding" / embedding_name,
+        "docling_layout": Path(os.environ.get("HF_HOME", str(models_dir / ".cache"))) / "hub"
     }
 
 def download_embedding_model() -> None:
@@ -88,7 +105,8 @@ def download_docling_models() -> None:
 
 def verify_models_exist() -> dict[str, bool]:
     paths = get_model_paths()
-    hf_cache = Path(os.environ.get("HF_HOME", "./models/.cache")) / "hub"
+    models_dir = config("MODELS_DIR")
+    hf_cache = Path(os.environ.get("HF_HOME", str(models_dir / ".cache"))) / "hub"
     docling_layout_exists = hf_cache.exists() and len(list(hf_cache.glob("models--docling-project--docling-layout-heron"))) > 0
     docling_table_exists = hf_cache.exists() and len(list(hf_cache.glob("models--docling-project--docling-models"))) > 0
     return {"embedding": paths["embedding"].exists(), "docling_layout": docling_layout_exists, "docling_table": docling_table_exists}
@@ -102,11 +120,18 @@ def is_supported_file(file_path: Path) -> bool:
 def should_exclude_file(file_path: Path) -> bool:
     return any(fnmatch.fnmatch(file_path.name, pattern) for pattern in EXCLUDE_PATTERNS)
 
-def discover_files(root_path: Path, recursive: bool = True, include_extensions: set[str] | None = None, limit: int | None = None) -> list[Path]:
+def discover_files(root_path: Path, recursive: bool = True,
+                   include_extensions: set[str] | None = None) -> Iterator[Path]:
+    """Yield supported files one at a time (memory-efficient for large directories)."""
     extensions = include_extensions or SUPPORTED_EXTENSIONS
     pattern = "**/*" if recursive else "*"
-    valid_files = sorted([f for f in root_path.glob(pattern) if f.is_file() and is_supported_file(f) and not should_exclude_file(f)])
-    return valid_files[:limit] if limit and limit > 0 else valid_files
+    for f in root_path.glob(pattern):
+        try:
+            if f.is_file() and is_supported_file(f) and not should_exclude_file(f):
+                yield f
+        except (PermissionError, OSError):
+            # Skip inaccessible files (permission denied, locked, broken symlinks)
+            continue
 
 def is_file_modified(file_path: Path, ingested_at_iso: str) -> bool:
     if not file_path.exists() or ingested_at_iso == 'unknown':

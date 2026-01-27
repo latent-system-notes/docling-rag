@@ -115,7 +115,8 @@
       "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" mcp status)",
       "Bash(\"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\dist\\\\docling-rag-portable\\\\rag.bat\" mcp stop)",
       "Bash(.venv\\\\\\\\Scripts\\\\\\\\python:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(del \"C:\\\\Users\\\\arif\\\\PycharmProjects\\\\docling-rag\\\\src\\\\ingestion\\\\checkpoint.py\")"
     ]
   }
 }

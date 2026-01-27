@@ -5,13 +5,13 @@ import zlib
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-from ..config import CHROMA_PERSIST_DIR, COLLECTION_NAME, get_logger
+from ..config import get_chroma_persist_dir, COLLECTION_NAME, get_logger
 
 logger = get_logger(__name__)
 
 class BM25SqliteIndex:
     def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = db_path or (CHROMA_PERSIST_DIR / "bm25.sqlite3")
+        self.db_path = db_path or (get_chroma_persist_dir() / "bm25.sqlite3")
         self.conn = None
         self.idf_scores = {}
         self.avg_doc_len = 0.0
