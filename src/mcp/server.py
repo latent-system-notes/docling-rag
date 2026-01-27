@@ -3,7 +3,7 @@ import signal
 import sys
 
 from ..config import config, MCP_HOST, MCP_TRANSPORT, get_logger
-from ..query import query
+from ..query import query as Query
 from ..storage.chroma_client import list_documents
 from ..models import QueryResult
 from ..utils import cleanup_all_resources
@@ -30,12 +30,12 @@ def run_server():
 
     mcp = FastMCP(name=server_name, instructions=instructions)
 
-    @mcp.tool(description=query_desc)
-    async def query_rag(query_text: str, top_k: int = 5) -> QueryResult:
-        return query(query_text, top_k)
+    @mcp.tool(name="search_documents",description=query_desc)
+    async def search_documents(query: str, max_results: int = 5) -> QueryResult:
+        return Query(query, max_results)
 
-    @mcp.tool(description=list_desc)
-    async def list_all_documents(limit: int | None = None, offset: int = 0) -> dict:
+    @mcp.tool(name="list_all_documents",description=list_desc)
+    async def list_all_documents(limit: int | None = 50, offset: int = 0) -> dict:
         documents = list_documents(limit=limit, offset=offset)
         total = len(list_documents())
         return {"documents": documents, "total": total, "showing": len(documents), "offset": offset}
