@@ -40,7 +40,7 @@ def load_document(source: str | Path | bytes | BinaryIO, doc_format: str | None 
         pipeline_options = PdfPipelineOptions()
         pipeline_options.accelerator_options = accelerator_options
         pipeline_options.ocr_options = _get_ocr_options()
-        pipeline_options.do_ocr = True
+        pipeline_options.do_ocr = False
         pipeline_options.enable_remote_services = False
 
         local_docling_path = get_model_paths()["docling_layout"]

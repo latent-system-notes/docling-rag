@@ -133,7 +133,7 @@ def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool 
             skipped += 1
             continue
         try:
-            with quiet_logging(), console.status(f"Processing {f.name}..."):
+            with console.status(f"Processing {f.name}..."):
                 meta = ingest_document(f)
             processed += 1
             console.print(f"[green]{f.name} ({meta.num_chunks} chunks)")
