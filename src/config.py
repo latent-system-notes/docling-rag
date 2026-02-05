@@ -18,11 +18,12 @@ class _Fmt(logging.Formatter):
 _h = logging.StreamHandler()
 _h.setFormatter(_Fmt("[%(levelname)s] [%(asctime)s] %(message)s", "%d-%b %H:%M:%S"))
 logging.getLogger().handlers = [_h]
-logging.getLogger().setLevel(logging.DEBUG)
+logging.getLogger().setLevel(logging.INFO)
 # for lib in ["RapidOCR", "transformers", "sentence_transformers", "chromadb", "httpx"]:
 #     logging.getLogger(lib).setLevel(logging.WARNING)
 
-device = os.environ.get("RAG_DEVICE", "cpu").lower()
+device = os.environ.get("RAG_DEVICE", "cuda").lower()
+
 if device == "cpu":
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
@@ -35,7 +36,7 @@ except ImportError:
 
 # HARDCODED CONSTANTS
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-EMBEDDING_BATCH_SIZE = 32
+EMBEDDING_BATCH_SIZE = 256
 MAX_TOKENS = 512
 DEFAULT_TOP_K = 5
 COLLECTION_NAME = "documents"

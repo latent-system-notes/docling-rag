@@ -1,10 +1,9 @@
-import hashlib
-from pathlib import Path
-from typing import Optional
-
 import chromadb
+import hashlib
 import numpy as np
 from chromadb.config import Settings as ChromaSettings
+from pathlib import Path
+from typing import Optional
 
 from ..config import get_chroma_persist_dir, COLLECTION_NAME, EMBEDDING_MODEL, get_logger
 from ..models import StorageError
@@ -42,12 +41,20 @@ def create_collection() -> None:
     except Exception as e:
         raise StorageError(f"Failed to create collection: {e}") from e
 
+
+CHROMA_MAX_BATCH_SIZE = 5000
+
 def _add_vectors_chromadb_only(ids: list[str], vectors: np.ndarray, metadata: list[dict]) -> None:
     try:
         collection = get_chroma_client().get_collection(COLLECTION_NAME)
         documents = [meta.get("text", "") for meta in metadata]
         metadatas = [{k: v if v is not None else "" for k, v in meta.items() if k != "text" and isinstance(v, (str, int, float, bool))} for meta in metadata]
-        collection.add(ids=ids, embeddings=vectors.tolist(), documents=documents, metadatas=metadatas)
+        # collection.add(ids=ids, embeddings=vectors.tolist(), documents=documents, metadatas=metadatas)
+        embeddings = vectors.tolist()
+        for i in range(0, len(ids), CHROMA_MAX_BATCH_SIZE):
+            end = i + CHROMA_MAX_BATCH_SIZE
+            collection.add(ids=ids[i:end], embeddings=embeddings[i:end], documents=documents[i:end],
+                           metadatas=metadatas[i:end])
     except Exception as e:
         raise StorageError(f"Failed to add vectors to ChromaDB: {e}") from e
 
@@ -56,6 +63,7 @@ def rollback_batch(ids: list[str]) -> None:
         get_chroma_client().get_collection(COLLECTION_NAME).delete(ids=ids)
     except Exception as e:
         raise StorageError(f"Failed to rollback batch: {e}") from e
+
 
 def add_vectors(ids: list[str], vectors: np.ndarray, metadata: list[dict]) -> None:
     documents = [meta.get("text", "") for meta in metadata]

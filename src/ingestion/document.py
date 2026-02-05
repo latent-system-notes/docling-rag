@@ -1,21 +1,21 @@
 import hashlib
 import os
 from datetime import datetime
-from pathlib import Path
-from typing import BinaryIO
-
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, LayoutModelConfig
+from docling.datamodel.pipeline_options import PdfPipelineOptions, LayoutModelConfig, ThreadedPdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.pipeline.threaded_standard_pdf_pipeline import ThreadedStandardPdfPipeline
+from docling.utils.profiling import ProfilingItem
 from docling_core.types.doc import DoclingDocument
+from pathlib import Path
+from typing import BinaryIO
 
 from ..config import get_logger
 from ..models import DocumentLoadError, DocumentMetadata
 from ..utils import detect_language, get_model_paths
 
 logger = get_logger(__name__)
-
 
 def _get_ocr_options():
     from docling.datamodel.pipeline_options import RapidOcrOptions
@@ -36,12 +36,13 @@ def load_document(source: str | Path | bytes | BinaryIO, doc_format: str | None 
                 except Exception:
                     pass
 
-        accelerator_options = AcceleratorOptions(num_threads=4, device=AcceleratorDevice.CPU)
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.accelerator_options = accelerator_options
-        pipeline_options.ocr_options = _get_ocr_options()
+        pipeline_options = ThreadedPdfPipelineOptions(
+            accelerator_options=AcceleratorOptions(device=AcceleratorDevice.CUDA),
+            ocr_batch_size=4,
+            layout_batch_size=64,
+            table_batch_size=4
+        )
         pipeline_options.do_ocr = False
-        pipeline_options.enable_remote_services = False
 
         local_docling_path = get_model_paths()["docling_layout"]
         os.environ["HF_HOME"] = str(local_docling_path.parent)
@@ -54,12 +55,13 @@ def load_document(source: str | Path | bytes | BinaryIO, doc_format: str | None 
                 layout_model_path = snapshots[0]
                 pipeline_options.layout_options.model_spec = LayoutModelConfig(
                     name="docling_layout_heron", repo_id="docling-project/docling-layout-heron",
-                    revision="main", model_path=str(layout_model_path), supported_devices=[AcceleratorDevice.CPU])
+                    revision="main", model_path=str(layout_model_path))
 
         converter = DocumentConverter(allowed_formats=None,
                                       format_options={
-                                          InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)})
-
+                                          InputFormat.PDF: PdfFormatOption(
+                                              pipeline_cls=ThreadedStandardPdfPipeline,
+                                              pipeline_options=pipeline_options)})
         logger.info(f"Processing {source}")
         result = converter.convert(source)
         return result.document, page_count

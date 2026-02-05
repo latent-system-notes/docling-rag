@@ -18,15 +18,17 @@ def ingest_document(file_path: str | Path) -> DocumentMetadata:
 
     doc, page_count = load_document(file_path)
     doc_id = hashlib.md5(str(file_path.absolute()).encode()).hexdigest()
+    logger.info(f"Chunking documents : {file_path}")
     chunks = chunk_document(doc, doc_id=str(file_path))
 
     if not chunks:
         raise IngestionError(f"No chunks extracted from {file_path}")
-
+    logger.info(f"Extracting metadata : {file_path}")
     metadata = extract_metadata(doc, file_path, len(chunks), page_count)
     del doc
 
     chunk_texts = [c.text for c in chunks]
+    logger.info(f"Embedding chunks : {file_path}")
     embeddings = embed(chunk_texts, show_progress=True)
 
     metadatas = [
@@ -35,6 +37,7 @@ def ingest_document(file_path: str | Path) -> DocumentMetadata:
          "ingested_at": metadata.ingested_at.isoformat(), "chunk_index": c.metadata.get("index", i)}
         for i, c in enumerate(chunks)
     ]
+    logger.info(f"Storing vector : {file_path}")
     add_vectors([c.id for c in chunks], embeddings, metadatas)
 
     logger.info(f"Ingested {file_path}: {len(chunks)} chunks")

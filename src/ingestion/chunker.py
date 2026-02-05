@@ -20,7 +20,6 @@ def chunk_document(doc: DoclingDocument, doc_id: str) -> list[Chunk]:
         hf_tokenizer = AutoTokenizer.from_pretrained(str(local_model_path), local_files_only=True, trust_remote_code=False)
         tokenizer = HuggingFaceTokenizer(tokenizer=hf_tokenizer, max_tokens=MAX_TOKENS)
         chunker = HybridChunker(tokenizer=tokenizer, max_tokens=MAX_TOKENS)
-
         chunks: Iterable = chunker.chunk(doc)
         result = []
         for idx, chunk in enumerate(chunks):
