@@ -1,5 +1,5 @@
 import hashlib
-from typing import Iterable
+from typing import Iterable, Optional
 
 from docling.chunking import HybridChunker
 from docling_core.types.doc import DoclingDocument
@@ -12,14 +12,31 @@ from ..utils import get_model_paths
 
 logger = get_logger(__name__)
 
+_chunker_cache: Optional[HybridChunker] = None
+
+
+def get_chunker() -> HybridChunker:
+    global _chunker_cache
+    if _chunker_cache is not None:
+        return _chunker_cache
+
+    local_model_path = get_model_paths()["embedding"]
+    if not local_model_path.exists():
+        raise ChunkingError(f"Tokenizer model not found at {local_model_path}. Run 'rag models --download' first.")
+    hf_tokenizer = AutoTokenizer.from_pretrained(str(local_model_path), local_files_only=True, trust_remote_code=False)
+    tokenizer = HuggingFaceTokenizer(tokenizer=hf_tokenizer, max_tokens=MAX_TOKENS)
+    _chunker_cache = HybridChunker(tokenizer=tokenizer, max_tokens=MAX_TOKENS)
+    return _chunker_cache
+
+
+def cleanup_chunker() -> None:
+    global _chunker_cache
+    _chunker_cache = None
+
+
 def chunk_document(doc: DoclingDocument, doc_id: str) -> list[Chunk]:
     try:
-        local_model_path = get_model_paths()["embedding"]
-        if not local_model_path.exists():
-            raise ChunkingError(f"Tokenizer model not found at {local_model_path}. Run 'rag models --download' first.")
-        hf_tokenizer = AutoTokenizer.from_pretrained(str(local_model_path), local_files_only=True, trust_remote_code=False)
-        tokenizer = HuggingFaceTokenizer(tokenizer=hf_tokenizer, max_tokens=MAX_TOKENS)
-        chunker = HybridChunker(tokenizer=tokenizer, max_tokens=MAX_TOKENS)
+        chunker = get_chunker()
         chunks: Iterable = chunker.chunk(doc)
         result = []
         for idx, chunk in enumerate(chunks):

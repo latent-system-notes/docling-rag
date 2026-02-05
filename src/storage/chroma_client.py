@@ -49,11 +49,10 @@ def _add_vectors_chromadb_only(ids: list[str], vectors: np.ndarray, metadata: li
         collection = get_chroma_client().get_collection(COLLECTION_NAME)
         documents = [meta.get("text", "") for meta in metadata]
         metadatas = [{k: v if v is not None else "" for k, v in meta.items() if k != "text" and isinstance(v, (str, int, float, bool))} for meta in metadata]
-        # collection.add(ids=ids, embeddings=vectors.tolist(), documents=documents, metadatas=metadatas)
-        embeddings = vectors.tolist()
         for i in range(0, len(ids), CHROMA_MAX_BATCH_SIZE):
             end = i + CHROMA_MAX_BATCH_SIZE
-            collection.add(ids=ids[i:end], embeddings=embeddings[i:end], documents=documents[i:end],
+            batch_embeddings = vectors[i:end].tolist()
+            collection.add(ids=ids[i:end], embeddings=batch_embeddings, documents=documents[i:end],
                            metadatas=metadatas[i:end])
     except Exception as e:
         raise StorageError(f"Failed to add vectors to ChromaDB: {e}") from e
@@ -125,11 +124,11 @@ def document_exists(file_path: str | Path) -> bool:
     except Exception:
         return False
 
-def list_documents(limit: int | None = None, offset: int = 0) -> list[dict]:
+def _build_docs_map() -> dict[str, dict]:
     collection = get_chroma_client().get_collection(COLLECTION_NAME)
-    results = collection.get()
+    results = collection.get(include=["metadatas"])
     if not results['ids']:
-        return []
+        return {}
     docs_map = {}
     for i, chunk_id in enumerate(results['ids']):
         metadata = results['metadatas'][i]
@@ -139,6 +138,17 @@ def list_documents(limit: int | None = None, offset: int = 0) -> list[dict]:
                 'doc_type': metadata.get('doc_type', 'unknown'), 'language': metadata.get('language', 'unknown'),
                 'ingested_at': metadata.get('ingested_at', 'unknown'), 'num_chunks': 0}
         docs_map[doc_id]['num_chunks'] += 1
+    return docs_map
+
+
+def get_document_count() -> int:
+    return len(_build_docs_map())
+
+
+def list_documents(limit: int | None = None, offset: int = 0) -> list[dict]:
+    docs_map = _build_docs_map()
+    if not docs_map:
+        return []
     documents = sorted(docs_map.values(), key=lambda x: x['ingested_at'] if x['ingested_at'] != 'unknown' else '', reverse=True)
     if offset > 0:
         documents = documents[offset:]

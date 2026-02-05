@@ -6,6 +6,8 @@ from pathlib import Path
 
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["OMP_NUM_THREADS"] = os.environ.get("OMP_NUM_THREADS", "4")
+os.environ["MKL_NUM_THREADS"] = os.environ.get("MKL_NUM_THREADS", "4")
 
 warnings.filterwarnings("ignore", message=".*Token indices sequence length.*")
 warnings.filterwarnings("ignore", message=".*incorrect regex pattern.*")
@@ -29,6 +31,8 @@ if device == "cpu":
 
 try:
     import torch
+    torch.set_num_threads(4)
+    torch.set_num_interop_threads(2)
     torch.set_default_device({"cpu": "cpu", "cuda": "cuda" if torch.cuda.is_available() else "cpu",
                               "mps": "mps" if torch.backends.mps.is_available() else "cpu"}.get(device, "cpu"))
 except ImportError:

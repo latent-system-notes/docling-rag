@@ -52,10 +52,10 @@ def list_docs(env: str, full_path: bool = False, limit: int = None, offset: int 
     """List indexed documents."""
     _load_env(env)
     from datetime import datetime
-    from src.storage.chroma_client import initialize_collections, list_documents
+    from src.storage.chroma_client import initialize_collections, list_documents, get_document_count
     initialize_collections()
     docs = list_documents(limit=limit, offset=offset)
-    total = len(list_documents())
+    total = get_document_count()
 
     if not docs:
         console.print(f"[yellow]No documents found{f' at offset {offset}' if offset else ''}.")
@@ -97,7 +97,7 @@ def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool 
     _load_env(env)
     from src.config import config, get_logger
     from src.ingestion.pipeline import ingest_document
-    from src.utils import discover_files, is_supported_file
+    from src.utils import discover_files, is_supported_file, managed_resources
     from src.storage.chroma_client import initialize_collections, document_exists
 
     logger = get_logger(__name__)
@@ -120,27 +120,28 @@ def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool 
         console.print(f"[cyan]Scanning {doc_path}...[/cyan]")
 
     processed, skipped, failed = 0, 0, 0
-    for f in files:
-        if dry_run:
-            console.print(f"  + {f.name}")
-            processed += 1
-            if processed >= 20:
-                console.print("  ... (dry-run limited to 20)")
-                break
-            continue
+    with managed_resources():
+        for f in files:
+            if dry_run:
+                console.print(f"  + {f.name}")
+                processed += 1
+                if processed >= 20:
+                    console.print("  ... (dry-run limited to 20)")
+                    break
+                continue
 
-        if not force and document_exists(f):
-            skipped += 1
-            continue
-        try:
-            with console.status(f"Processing {f.name}..."):
-                meta = ingest_document(f)
-            processed += 1
-            console.print(f"[green]{f.name} ({meta.num_chunks} chunks)")
-        except Exception as e:
-            failed += 1
-            logger.error(f"{f.name}: {e}")
-            console.print(f"[red]{f.name}: {e}")
+            if not force and document_exists(f):
+                skipped += 1
+                continue
+            try:
+                with console.status(f"Processing {f.name}..."):
+                    meta = ingest_document(f)
+                processed += 1
+                console.print(f"[green]{f.name} ({meta.num_chunks} chunks)")
+            except Exception as e:
+                failed += 1
+                logger.error(f"{f.name}: {e}")
+                console.print(f"[red]{f.name}: {e}")
 
     console.print(f"\n[bold]Done:[/bold] {processed} processed, {skipped} skipped, {failed} failed")
 

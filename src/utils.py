@@ -69,6 +69,16 @@ def cleanup_embedder() -> None:
             pass
         finally:
             _embedder_cache = None
+    _free_cuda_cache()
+
+
+def _free_cuda_cache() -> None:
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
 def embed(texts: str | list[str], show_progress: bool = False) -> np.ndarray:
     try:
@@ -152,8 +162,13 @@ def managed_resources():
 
 def cleanup_all_resources() -> None:
     cleanup_embedder()
+    from .ingestion.document import cleanup_converter
+    cleanup_converter()
+    from .ingestion.chunker import cleanup_chunker
+    cleanup_chunker()
     from .storage.chroma_client import cleanup_chroma_client
     cleanup_chroma_client()
     from .storage.bm25_index import get_bm25_index
     get_bm25_index().close()
     gc.collect()
+    _free_cuda_cache()
