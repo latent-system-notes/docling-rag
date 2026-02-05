@@ -1,23 +1,39 @@
+x-common: &common
+  image: nvcr.io/nvidia/docling:0.0.1-rc3
+  working_dir: /workspace/app
+  environment:
+    - PATH=/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    - VIRTUAL_ENV=/opt/venv
+  volumes:
+    - ${APP_PATH:-/home/user/workspace/docling-rag}:/workspace/app
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+  restart: unless-stopped
+
 services:
-  docling-rag:
-    build: .
-    container_name: docling-rag
-    stdin_open: true
-    tty: true
+  techpub:
+    <<: *common
+    container_name: docling-techpub
     volumes:
-      # Mount documents and data from host (adjust paths as needed)
-      - ../docs:/workspace/docs:ro
-      - ../data:/workspace/data
-      # Optionally mount app for development (comment out for production)
-      # - .:/workspace/app
-    working_dir: /workspace/app
-    environment:
-      - RAG_DEVICE=cpu
-    # Uncomment below for GPU support
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+      - ${APP_PATH:-/home/user/workspace/docling-rag}:/workspace/app
+      - ${TECHPUB_DATA_PATH:-/home/user/workspace/data/techpub}:/workspace/data
+      - "${TECHPUB_DOCS_PATH:-/mnt/techpub-docs/3. General Military Publications}:/workspace/docs"
+    ports:
+      - "${TECHPUB_PORT:-9090}:9090"
+    command: python -m cli.cli mcp techpub
+
+  safety:
+    <<: *common
+    container_name: docling-safety
+    volumes:
+      - ${APP_PATH:-/home/user/workspace/docling-rag}:/workspace/app
+      - ${SAFETY_DATA_PATH:-/home/user/workspace/data}:/workspace/data
+      - ${SAFETY_DOCS_PATH:-/home/user/workspace/docs}:/workspace/docs
+    ports:
+      - "${SAFETY_PORT:-9091}:9090"
+    command: python -m cli.cli mcp safety
