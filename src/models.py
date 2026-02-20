@@ -1,9 +1,6 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 from pydantic import BaseModel, Field
-
-ChunkingMethod = Literal["hybrid", "hierarchical"]
-Device = Literal["cpu", "cuda", "mps", "auto"]
 
 class Chunk(BaseModel):
     id: str
