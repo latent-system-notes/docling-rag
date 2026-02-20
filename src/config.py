@@ -62,10 +62,12 @@ _ENV_DEFAULTS = {
 def config(key: str):
     """Get env-configurable value. Call at runtime, not import time."""
     value = os.environ.get(key) or _ENV_DEFAULTS.get(key)
-    if key == "MCP_PORT":
-        return int(value)
+    if key in ("MCP_PORT", "DOCLING_SERVE_TIMEOUT"):
+        return int(value) if value else None
     if key in ("DATA_DIR", "MODELS_DIR", "DOCUMENTS_DIR"):
         return Path(value)
+    if key == "INCLUDE_FOLDERS":
+        return [f.strip() for f in value.split("|") if f.strip()] if value else None
     return value
 
 def get_chroma_persist_dir() -> Path:

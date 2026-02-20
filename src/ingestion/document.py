@@ -29,10 +29,13 @@ def _convert_via_api(source: str | Path) -> DoclingDocument:
     headers = {"X-API-Key": api_key} if api_key else {}
     source_path = Path(source)
     with open(source_path, "rb") as f:
-        resp = httpx.post(url, files={"file": (source_path.name, f, "application/octet-stream")},
-                          data={"options": '{"to_formats": ["json"]}'}, headers=headers, timeout=config("DOCLING_SERVE_TIMEOUT"))
-    resp.raise_for_status()
-    return DoclingDocument.model_validate(resp.json()["document"])
+        resp = httpx.post(url, files=[("files", (source_path.name, f, "application/octet-stream"))],
+                          data={"to_formats": "json"}, headers=headers, timeout=config("DOCLING_SERVE_TIMEOUT"))
+    try:
+        resp.raise_for_status()
+        return DoclingDocument.model_validate(resp.json()["document"]["json_content"])
+    finally:
+        resp.close()
 
 
 def load_document(source: str | Path) -> tuple[DoclingDocument, int | None]:

@@ -30,12 +30,18 @@ def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[SearchResult]:
         vector_results = search_vectors(embed(query), top_k * 3)
         rrf_scores = _reciprocal_rank_fusion([bm25_results, [(h["id"], h["score"]) for h in vector_results]])
         top_ids = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        batch_ids = [doc_id for doc_id, _ in top_ids]
+        if not batch_ids:
+            return []
         collection = get_chroma_client().get_collection(COLLECTION_NAME)
+        data = collection.get(ids=batch_ids)
+        id_to_idx = {cid: i for i, cid in enumerate(data['ids'])}
         results = []
         for doc_id, rrf_score in top_ids:
-            data = collection.get(ids=[doc_id])
-            if data['ids']:
-                results.append(_make_result(doc_id, data['documents'][0], data['metadatas'][0], rrf_score))
+            if doc_id in id_to_idx:
+                i = id_to_idx[doc_id]
+                results.append(_make_result(doc_id, data['documents'][i], data['metadatas'][i], rrf_score))
+        del data
         return results
 
     raw = search_vectors(embed(query), top_k)

@@ -65,6 +65,22 @@ def search_vectors(query_vector: np.ndarray, top_k: int) -> list[dict]:
     except Exception as e:
         raise StorageError(f"Failed to search vectors: {e}") from e
 
+def get_document_count() -> int:
+    collection = _get_collection()
+    total = collection.count()
+    if total == 0:
+        return 0
+    doc_ids = set()
+    batch_size = 10000
+    for offset in range(0, total, batch_size):
+        results = collection.get(include=["metadatas"], limit=batch_size, offset=offset)
+        if not results['ids']:
+            break
+        for meta in results['metadatas']:
+            doc_ids.add(meta.get('doc_id', 'unknown'))
+        del results
+    return len(doc_ids)
+
 def get_stats() -> dict:
     count = _get_collection().count()
     return {"collection": COLLECTION_NAME, "total_chunks": count, "embedding_model": EMBEDDING_MODEL, "vector_store": "chromadb"}
@@ -86,18 +102,25 @@ def document_exists(file_path: str | Path) -> bool:
         return False
 
 def _build_docs_map() -> dict[str, dict]:
-    results = _get_collection().get(include=["metadatas"])
-    if not results['ids']:
+    collection = _get_collection()
+    total = collection.count()
+    if total == 0:
         return {}
     docs_map = {}
-    for i, chunk_id in enumerate(results['ids']):
-        meta = results['metadatas'][i]
-        doc_id = meta.get('doc_id', 'unknown')
-        if doc_id not in docs_map:
-            docs_map[doc_id] = {'doc_id': doc_id, 'file_path': meta.get('file_path', 'unknown'),
-                'doc_type': meta.get('doc_type', 'unknown'), 'language': meta.get('language', 'unknown'),
-                'ingested_at': meta.get('ingested_at', 'unknown'), 'num_chunks': 0}
-        docs_map[doc_id]['num_chunks'] += 1
+    batch_size = 10000
+    for offset in range(0, total, batch_size):
+        results = collection.get(include=["metadatas"], limit=batch_size, offset=offset)
+        if not results['ids']:
+            break
+        for i, chunk_id in enumerate(results['ids']):
+            meta = results['metadatas'][i]
+            doc_id = meta.get('doc_id', 'unknown')
+            if doc_id not in docs_map:
+                docs_map[doc_id] = {'doc_id': doc_id, 'file_path': meta.get('file_path', 'unknown'),
+                    'doc_type': meta.get('doc_type', 'unknown'), 'language': meta.get('language', 'unknown'),
+                    'ingested_at': meta.get('ingested_at', 'unknown'), 'num_chunks': 0}
+            docs_map[doc_id]['num_chunks'] += 1
+        del results
     return docs_map
 
 def list_documents(limit: int | None = None, offset: int = 0) -> list[dict]:

@@ -86,10 +86,27 @@ EXCLUDE_PATTERNS = {'.*', '__*', '*.tmp', '*.temp', '~*', '*.bak', '*.backup', '
 def is_supported_file(file_path: Path) -> bool:
     return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
 
-def discover_files(root_path: Path, recursive: bool = True) -> Iterator[Path]:
+def _in_included_folder(file_path: Path, root_path: Path, include_folders: list[str]) -> bool:
+    """Check if file is inside a folder matching any of the include_folders patterns."""
+    try:
+        rel = file_path.relative_to(root_path)
+    except ValueError:
+        return False
+    # Files directly in root have no parent folder to match
+    if len(rel.parts) < 2:
+        return False
+    return any(
+        fnmatch.fnmatch(part, pattern)
+        for part in rel.parts[:-1]
+        for pattern in include_folders
+    )
+
+def discover_files(root_path: Path, recursive: bool = True, include_folders: list[str] | None = None) -> Iterator[Path]:
     for f in root_path.glob("**/*" if recursive else "*"):
         try:
             if f.is_file() and is_supported_file(f) and not any(fnmatch.fnmatch(f.name, p) for p in EXCLUDE_PATTERNS):
+                if include_folders and not _in_included_folder(f, root_path, include_folders):
+                    continue
                 yield f
         except (PermissionError, OSError):
             continue

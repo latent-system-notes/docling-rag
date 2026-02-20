@@ -91,7 +91,8 @@ def remove(env: str, doc_id: str, yes: bool = typer.Option(False, "-y")):
 
 
 @app.command()
-def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool = False):
+def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool = False,
+           folders: str = typer.Option(None, help="Pipe-separated folder names to include (overrides INCLUDE_FOLDERS)")):
     _load_env(env)
     from src.config import config, get_logger
     from src.ingestion.pipeline import ingest_document
@@ -101,6 +102,17 @@ def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool 
     logger = get_logger(__name__)
     create_collection()
     doc_path = config("DOCUMENTS_DIR")
+
+    # Resolve include_folders: CLI --folders overrides env var
+    include_folders = None
+    if folders:
+        include_folders = [f.strip() for f in folders.split("|") if f.strip()]
+    else:
+        include_folders = config("INCLUDE_FOLDERS")
+
+    if include_folders:
+        logger.info(f"Folder filter active: {include_folders}")
+        console.print(f"[cyan]Filtering to folders: {', '.join(include_folders)}[/cyan]")
 
     if not doc_path.exists():
         console.print(f"[red]Path not found: {doc_path}[/red]")
@@ -113,7 +125,7 @@ def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool 
         files = [doc_path]
         console.print(f"[cyan]Processing file: {doc_path.name}[/cyan]")
     else:
-        files = discover_files(doc_path, recursive=recursive)
+        files = discover_files(doc_path, recursive=recursive, include_folders=include_folders)
         console.print(f"[cyan]Scanning {doc_path}...[/cyan]")
 
     processed, skipped, failed = 0, 0, 0

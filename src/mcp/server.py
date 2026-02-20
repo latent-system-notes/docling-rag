@@ -23,8 +23,9 @@ def run_server():
 
     @mcp.tool(name="list_all_documents", description=config("MCP_TOOL_LIST_DOCS_DESC"))
     async def list_all_documents(limit: int | None = 50, offset: int = 0) -> dict:
+        from ..storage.chroma_client import get_document_count
         docs = list_documents(limit=limit, offset=offset)
-        return {"documents": docs, "total": len(list_documents()), "showing": len(docs), "offset": offset}
+        return {"documents": docs, "total": get_document_count(), "showing": len(docs), "offset": offset}
 
     atexit.register(cleanup_all_resources)
     for sig in (signal.SIGINT, signal.SIGTERM):

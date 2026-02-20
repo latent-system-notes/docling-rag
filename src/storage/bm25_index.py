@@ -29,7 +29,12 @@ class BM25SqliteIndex:
                 chunk_id TEXT PRIMARY KEY, tokens BLOB NOT NULL, doc_length INTEGER NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
             self.conn.execute("""CREATE TABLE IF NOT EXISTS bm25_statistics (
                 key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+            self.conn.execute("""CREATE TABLE IF NOT EXISTS bm25_inverted (
+                term TEXT NOT NULL, chunk_id TEXT NOT NULL, tf INTEGER NOT NULL,
+                PRIMARY KEY (term, chunk_id))""")
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_chunk_id ON bm25_documents(chunk_id)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_term ON bm25_inverted(term)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_chunk ON bm25_inverted(chunk_id)")
 
     def _tokenize(self, text: str) -> list[str]:
         return text.lower().split()
@@ -39,6 +44,7 @@ class BM25SqliteIndex:
             return
         with self.conn:
             self.conn.execute("DELETE FROM bm25_documents")
+            self.conn.execute("DELETE FROM bm25_inverted")
             self.conn.execute("DELETE FROM bm25_statistics")
         for i in range(0, len(documents), 1000):
             self._add_batch(documents[i:i+1000], doc_ids[i:i+1000])
@@ -50,6 +56,13 @@ class BM25SqliteIndex:
                 tokens = self._tokenize(text)
                 self.conn.execute("INSERT OR REPLACE INTO bm25_documents (chunk_id, tokens, doc_length) VALUES (?, ?, ?)",
                     (doc_id, zlib.compress(json.dumps(tokens).encode('utf-8')), len(tokens)))
+                # build inverted index entries
+                tf_map = {}
+                for t in tokens:
+                    tf_map[t] = tf_map.get(t, 0) + 1
+                for term, tf in tf_map.items():
+                    self.conn.execute("INSERT OR REPLACE INTO bm25_inverted (term, chunk_id, tf) VALUES (?, ?, ?)",
+                        (term, doc_id, tf))
 
     def add_documents_atomic(self, documents: list[str], doc_ids: list[str]) -> None:
         if not documents:
@@ -64,6 +77,7 @@ class BM25SqliteIndex:
         with self.conn:
             placeholders = ','.join('?' * len(doc_ids_to_remove))
             self.conn.execute(f"DELETE FROM bm25_documents WHERE chunk_id IN ({placeholders})", doc_ids_to_remove)
+            self.conn.execute(f"DELETE FROM bm25_inverted WHERE chunk_id IN ({placeholders})", doc_ids_to_remove)
         self._update_statistics()
 
     def _update_statistics(self):
@@ -71,13 +85,14 @@ class BM25SqliteIndex:
         if self.num_docs == 0:
             self.idf_scores = {}
             self.avg_doc_len = 0.0
+            with self.conn:
+                self.conn.execute("DELETE FROM bm25_statistics")
             return
         self.avg_doc_len = self.conn.execute("SELECT AVG(doc_length) FROM bm25_documents").fetchone()[0] or 0.0
-        term_doc_counts = {}
-        for (tokens_blob,) in self.conn.execute("SELECT tokens FROM bm25_documents"):
-            for token in set(json.loads(zlib.decompress(tokens_blob))):
-                term_doc_counts[token] = term_doc_counts.get(token, 0) + 1
-        self.idf_scores = {term: math.log((self.num_docs - dc + 0.5) / (dc + 0.5) + 1) for term, dc in term_doc_counts.items()}
+        # compute IDF from inverted index using SQL aggregation instead of loading all tokens
+        self.idf_scores = {}
+        for term, dc in self.conn.execute("SELECT term, COUNT(*) FROM bm25_inverted GROUP BY term"):
+            self.idf_scores[term] = math.log((self.num_docs - dc + 0.5) / (dc + 0.5) + 1)
         with self.conn:
             for key, value in [("idf_scores", json.dumps(self.idf_scores)), ("avg_doc_len", str(self.avg_doc_len)), ("num_docs", str(self.num_docs))]:
                 self.conn.execute("INSERT OR REPLACE INTO bm25_statistics (key, value) VALUES (?, ?)", (key, value))
@@ -98,24 +113,50 @@ class BM25SqliteIndex:
         if self.num_docs == 0:
             return []
         query_tokens = self._tokenize(query)
+        # filter to only tokens that have IDF scores
+        query_tokens = [qt for qt in query_tokens if qt in self.idf_scores]
+        if not query_tokens:
+            return []
+
+        # use inverted index: only load candidate docs that contain at least one query token
+        placeholders = ','.join('?' * len(query_tokens))
+        candidate_ids = set()
+        tf_lookup = {}  # (chunk_id, term) -> tf
+        for term, chunk_id, tf in self.conn.execute(
+            f"SELECT term, chunk_id, tf FROM bm25_inverted WHERE term IN ({placeholders})", query_tokens):
+            candidate_ids.add(chunk_id)
+            tf_lookup[(chunk_id, term)] = tf
+
+        if not candidate_ids:
+            return []
+
+        # fetch doc_length only for candidates
+        id_placeholders = ','.join('?' * len(candidate_ids))
+        candidate_list = list(candidate_ids)
+        doc_lengths = {}
+        for chunk_id, doc_len in self.conn.execute(
+            f"SELECT chunk_id, doc_length FROM bm25_documents WHERE chunk_id IN ({id_placeholders})", candidate_list):
+            doc_lengths[chunk_id] = doc_len
+
+        # score only candidates
         scores = {}
-        for chunk_id, tokens_blob, doc_len in self.conn.execute("SELECT chunk_id, tokens, doc_length FROM bm25_documents"):
-            tokens = json.loads(zlib.decompress(tokens_blob))
+        for chunk_id in candidate_ids:
+            doc_len = doc_lengths.get(chunk_id, self.avg_doc_len)
             score = 0.0
             for qt in query_tokens:
-                if qt not in self.idf_scores:
-                    continue
-                tf = tokens.count(qt)
+                tf = tf_lookup.get((chunk_id, qt), 0)
                 if tf == 0:
                     continue
                 score += self.idf_scores[qt] * (tf * (self.k1 + 1)) / (tf + self.k1 * (1 - self.b + self.b * (doc_len / self.avg_doc_len)))
             if score > 0:
                 scores[chunk_id] = score
+
         return sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
 
     def clear(self) -> None:
         with self.conn:
             self.conn.execute("DELETE FROM bm25_documents")
+            self.conn.execute("DELETE FROM bm25_inverted")
             self.conn.execute("DELETE FROM bm25_statistics")
         self.idf_scores = {}
         self.avg_doc_len = 0.0

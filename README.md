@@ -11,7 +11,7 @@ A document ingestion and retrieval system using Docling for document processing 
 
 2. Download required models:
    ```bash
-   rag models --download
+   python -m cli models --download
    ```
 
 3. Create an environment file (e.g., `.env.safety`):
@@ -23,17 +23,65 @@ A document ingestion and retrieval system using Docling for document processing 
 
 ## CLI Commands
 
+All commands are run via `python -m cli <command> <env>`, where `<env>` refers to the suffix of your `.env.<env>` file.
+
 ```bash
-rag ingest <env>              # Ingest documents from DOCUMENTS_DIR
-rag list <env>                # List indexed documents
-rag query <env> "question"    # Query the knowledge base
-rag remove <env> <doc_id>     # Remove a document
-rag stats <env>               # Show database statistics
-rag reset <env>               # Reset the database
-rag mcp <env>                 # Start MCP server
-rag models --download         # Download models
-rag models --verify           # Verify models are installed
+python -m cli ingest <env>              # Ingest documents from DOCUMENTS_DIR
+python -m cli list <env>                # List indexed documents
+python -m cli query <env> "question"    # Query the knowledge base
+python -m cli remove <env> <doc_id>     # Remove a document
+python -m cli stats <env>               # Show database statistics
+python -m cli reset <env>               # Reset the database
+python -m cli mcp <env>                 # Start MCP server
+python -m cli models --download         # Download models
+python -m cli models --verify           # Verify models are installed
 ```
+
+### Ingest Options
+
+```bash
+python -m cli ingest <env> --dry-run              # Preview which files would be ingested
+python -m cli ingest <env> --force                 # Re-ingest already indexed documents
+python -m cli ingest <env> --no-recursive          # Only process top-level files
+python -m cli ingest <env> --folders "Folder A|Folder B"  # Only ingest from specific folders
+```
+
+### List Options
+
+```bash
+python -m cli list <env> --full-path               # Show full file paths
+python -m cli list <env> --limit 10 --offset 20    # Paginate results
+```
+
+## Configuration
+
+All configuration is done via environment variables in `.env.<env>` files.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DOCUMENTS_DIR` | `./documents` | Path to the documents directory |
+| `DATA_DIR` | `./data` | Path to persistent data (ChromaDB, BM25 index) |
+| `MODELS_DIR` | `/opt/models` | Path to downloaded models |
+| `INCLUDE_FOLDERS` | *(unset)* | Pipe-separated folder names to include during ingestion |
+| `MCP_SERVER_NAME` | `docling-rag` | MCP server display name |
+| `MCP_PORT` | `9090` | MCP server port |
+| `RAG_DEVICE` | `cuda` | Compute device: `cuda`, `mps`, or `cpu` |
+
+### Folder Filtering
+
+When `DOCUMENTS_DIR` contains many subfolders but only specific ones should be ingested, use `INCLUDE_FOLDERS` to filter by folder name. Folder names are pipe-separated (`|`) because names may contain spaces or commas.
+
+In your `.env` file:
+```bash
+INCLUDE_FOLDERS="01 Vendor Publication|02 Document Publications"
+```
+
+Or override per-run via CLI:
+```bash
+python -m cli ingest safety --folders "01 Vendor Publication|02 Document Publications"
+```
+
+When `INCLUDE_FOLDERS` is not set, all files under `DOCUMENTS_DIR` are processed (backward compatible). When set, only files inside matching folders are included — files sitting directly in the `DOCUMENTS_DIR` root are excluded. Folder names are matched using glob patterns, so wildcards like `01*` are supported.
 
 ## GPU Acceleration
 
