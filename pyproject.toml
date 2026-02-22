@@ -8,11 +8,12 @@ packages = ["src", "cli"]
 [project]
 name = "docling-rag"
 version = "0.1.0"
-description = "RAG system with Docling and ChromaDB"
+description = "RAG system with Docling and PostgreSQL pgvector"
 requires-python = ">=3.11"
 dependencies = [
     "docling>=2.70",
-    "chromadb>=1.4",
+    "psycopg[binary,pool]>=3.2",
+    "pgvector>=0.3",
     "sentence-transformers>=5.0",
     "torch>=2.10",
     "langdetect>=1.0.9",
@@ -23,7 +24,6 @@ dependencies = [
     "pydantic>=2.12",
     "pydantic-settings>=2.12",
     "python-dotenv>=1.2",
-    "rank-bm25>=0.2.2",
     "pypdf>=6.0",
     "rapidocr>=3.5",
     "onnxruntime>=1.23",

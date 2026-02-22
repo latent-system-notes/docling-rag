@@ -50,7 +50,7 @@ def _load_env(env: str):
 def list_docs(env: str, full_path: bool = False, limit: int = None, offset: int = 0):
     _load_env(env)
     from datetime import datetime
-    from src.storage.chroma_client import create_collection, list_documents
+    from src.storage.postgres import create_collection, list_documents
     create_collection()
     all_docs = list_documents()
     total = len(all_docs)
@@ -83,7 +83,7 @@ def list_docs(env: str, full_path: bool = False, limit: int = None, offset: int 
 @app.command()
 def remove(env: str, doc_id: str, yes: bool = typer.Option(False, "-y")):
     _load_env(env)
-    from src.storage.chroma_client import create_collection, remove_document_by_id
+    from src.storage.postgres import create_collection, remove_document_by_id
     create_collection()
     if not yes and not typer.confirm(f"Remove document '{doc_id[-6:]}'?"): return
     n = remove_document_by_id(doc_id)
@@ -97,7 +97,7 @@ def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool 
     from src.config import config, get_logger
     from src.ingestion.pipeline import ingest_document
     from src.utils import discover_files, is_supported_file, managed_resources
-    from src.storage.chroma_client import create_collection, document_exists
+    from src.storage.postgres import create_collection, document_exists
 
     logger = get_logger(__name__)
     create_collection()
@@ -179,7 +179,7 @@ def query(env: str, query_text: str, top_k: int = None, format: str = "json"):
 @app.command()
 def stats(env: str):
     _load_env(env)
-    from src.storage.chroma_client import create_collection, get_stats, list_documents
+    from src.storage.postgres import create_collection, get_stats, list_documents
     create_collection()
     s = get_stats()
     t = Table(title="Stats", box=None)
@@ -193,7 +193,7 @@ def stats(env: str):
 @app.command()
 def reset(env: str):
     _load_env(env)
-    from src.storage.chroma_client import reset_collection
+    from src.storage.postgres import reset_collection
     if typer.confirm("Reset system?"): reset_collection(); console.print("[green]Reset complete")
 
 

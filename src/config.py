@@ -21,7 +21,7 @@ _h = logging.StreamHandler()
 _h.setFormatter(_Fmt("[%(levelname)s] [%(asctime)s] %(message)s", "%d-%b %H:%M:%S"))
 logging.getLogger().handlers = [_h]
 logging.getLogger().setLevel(logging.INFO)
-# for lib in ["RapidOCR", "transformers", "sentence_transformers", "chromadb", "httpx"]:
+# for lib in ["RapidOCR", "transformers", "sentence_transformers", "httpx"]:
 #     logging.getLogger(lib).setLevel(logging.WARNING)
 
 device = os.environ.get("RAG_DEVICE", "cuda").lower()
@@ -54,6 +54,13 @@ _ENV_DEFAULTS = {
     "DATA_DIR": "./data",
     "MODELS_DIR": "/opt/models",
     "DOCUMENTS_DIR": "./documents",
+    "POSTGRES_HOST": "localhost",
+    "POSTGRES_PORT": "5432",
+    "POSTGRES_DB": "docling_rag",
+    "POSTGRES_USER": "docling",
+    "POSTGRES_PASSWORD": "docling",
+    "POSTGRES_POOL_MIN": "2",
+    "POSTGRES_POOL_MAX": "10",
     "MCP_INSTRUCTIONS": "Do not write JSON in your response, because it will be shown as broken text and the tool will not be called; instead, call the tool only once using the MCP function calling format, make a summary after that first call, and never make a second search. For every user question except “list all documents,” you must always call search_documents(query, max_results=10), and if the user asks for a list of all documents, call list_all_documents() instead. Build your answer only from the data returned by the tool call and never use your own knowledge or memory. If no relevant results are found, tell the user the information is not in the knowledge base and ask them to rephrase the question with more specific terms, such as exact JAC REG or SGL numbers. Every fact, rule, or procedure must include citations with the document name and page number (for example, [JAC REG 385-7, Page 23]), include multiple citations if needed, and show the exact original cited text without opening the document unless the user asks.",
     "MCP_TOOL_QUERY_DESC": "Do not write JSON in your response, because it will appear as broken text and the tool will not be called; instead, call the tool only once using the specified MCP function format, make a summary after that call, and do not perform any additional searches beyond the initial search_documents() call. For every user query except “list all documents” or “open a document,” you must invoke search_documents() first and build your answer only from the data it returns, without adding any model knowledge. If no relevant results are found, clearly state that the information is not in the knowledge base and ask the user to rephrase the question with more specific terms, such as exact JAC REG or SGL numbers. Every fact, requirement, or procedure must include citations showing the document name and page number (for example, [JAC REG 385-7, Page 23]), include multiple citations when needed, and display the exact original cited text without opening the document unless the user requests it.",
     "MCP_TOOL_LIST_DOCS_DESC": "Do not write JSON in your response, as it will appear as broken text and the tool will not be called; instead, call the tool only once using the specified function format, do not make any additional searches, and create a summary using only the information returned by search_documents(). For every user query except “list all documents” or “open a document,” you must invoke search_documents() first and build the answer strictly from its results without adding any model knowledge. If no relevant information is found, clearly state that it is not available in the knowledge base and ask the user to rephrase the question with more specific terms, such as exact JAC REG or SGL numbers. Every fact, requirement, or procedure must include citations showing the document name and page number (for example, [JAC REG 385-7, Page 23]), include multiple citations when applicable, and display the exact original cited text without opening the document unless the user requests it.",
@@ -62,16 +69,13 @@ _ENV_DEFAULTS = {
 def config(key: str):
     """Get env-configurable value. Call at runtime, not import time."""
     value = os.environ.get(key) or _ENV_DEFAULTS.get(key)
-    if key in ("MCP_PORT", "DOCLING_SERVE_TIMEOUT"):
+    if key in ("MCP_PORT", "DOCLING_SERVE_TIMEOUT", "POSTGRES_PORT", "POSTGRES_POOL_MIN", "POSTGRES_POOL_MAX"):
         return int(value) if value else None
     if key in ("DATA_DIR", "MODELS_DIR", "DOCUMENTS_DIR"):
         return Path(value)
     if key == "INCLUDE_FOLDERS":
         return [f.strip() for f in value.split("|") if f.strip()] if value else None
     return value
-
-def get_chroma_persist_dir() -> Path:
-    return config("DATA_DIR") / "chroma"
 
 def _setup_hf_env():
     """Setup HuggingFace environment. Called after env is loaded."""

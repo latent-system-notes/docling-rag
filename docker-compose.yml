@@ -13,9 +13,31 @@ x-common: &common
           - driver: nvidia
             count: all
             capabilities: [gpu]
+  depends_on:
+    postgres:
+      condition: service_healthy
   restart: unless-stopped
 
 services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: docling-postgres
+    environment:
+      POSTGRES_DB: docling_rag
+      POSTGRES_USER: docling
+      POSTGRES_PASSWORD: docling
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docling -d docling_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   techpub:
     <<: *common
     container_name: docling-techpub
@@ -25,7 +47,7 @@ services:
       - "${TECHPUB_DOCS_PATH:-/mnt/techpub-docs/3. General Military Publications}:/workspace/docs"
     ports:
       - "${TECHPUB_PORT:-9090}:9090"
-    command: python -m cli.cli mcp techpub
+    command: python -m cli mcp techpub
 
   safety:
     <<: *common
@@ -36,4 +58,7 @@ services:
       - ${SAFETY_DOCS_PATH:-/home/user/workspace/docs}:/workspace/docs
     ports:
       - "${SAFETY_PORT:-9091}:9090"
-    command: python -m cli.cli mcp safety
+    command: python -m cli mcp safety
+
+volumes:
+  pgdata:

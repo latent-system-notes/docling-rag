@@ -4,7 +4,7 @@ import sys
 
 from ..config import config, MCP_HOST, MCP_TRANSPORT, get_logger
 from ..query import query as Query
-from ..storage.chroma_client import list_documents
+from ..storage.postgres import list_documents
 from ..models import QueryResult
 from ..utils import cleanup_all_resources
 
@@ -23,16 +23,16 @@ def run_server():
 
     @mcp.tool(name="list_all_documents", description=config("MCP_TOOL_LIST_DOCS_DESC"))
     async def list_all_documents(limit: int | None = 50, offset: int = 0) -> dict:
-        from ..storage.chroma_client import get_document_count
+        from ..storage.postgres import get_document_count
         docs = list_documents(limit=limit, offset=offset)
         return {"documents": docs, "total": get_document_count(), "showing": len(docs), "offset": offset}
 
     atexit.register(cleanup_all_resources)
     for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda *_: (cleanup_all_resources(), sys.exit(0)))
+        signal.signal(sig, lambda *_: sys.exit(0))
 
     logger.info(f"Starting MCP server ({MCP_HOST}:{port})")
     try:
         mcp.run(transport=MCP_TRANSPORT, host=MCP_HOST, port=port)
     except KeyboardInterrupt:
-        cleanup_all_resources()
+        pass

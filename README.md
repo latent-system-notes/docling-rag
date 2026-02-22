@@ -1,10 +1,23 @@
 # Docling RAG
 
-A document ingestion and retrieval system using Docling for document processing and ChromaDB for vector storage.
+A document ingestion and retrieval system using Docling for document processing and PostgreSQL + pgvector for vector storage with built-in full-text search.
 
 ## Setup
 
-1. Create a virtual environment and install dependencies:
+### PostgreSQL
+
+Start PostgreSQL with pgvector:
+```bash
+docker compose up postgres -d
+```
+
+This automatically creates the database schema via `docker/init.sql`.
+
+For local development without Docker, install PostgreSQL with the pgvector extension and run `docker/init.sql` manually.
+
+### Application
+
+1. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
@@ -14,11 +27,19 @@ A document ingestion and retrieval system using Docling for document processing 
    python -m cli models --download
    ```
 
-3. Create an environment file (e.g., `.env.safety`):
+3. Create an environment file (e.g., `.env.test`):
    ```bash
    DOCUMENTS_DIR=./docs/my-project
    DATA_DIR=./data
    MODELS_DIR=./models
+
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5432
+   POSTGRES_DB=docling_rag
+   POSTGRES_USER=docling
+   POSTGRES_PASSWORD=docling
+   POSTGRES_POOL_MIN=2
+   POSTGRES_POOL_MAX=10
    ```
 
 ## CLI Commands
@@ -53,6 +74,21 @@ python -m cli list <env> --full-path               # Show full file paths
 python -m cli list <env> --limit 10 --offset 20    # Paginate results
 ```
 
+## Docker Deployment
+
+```bash
+# Start everything (PostgreSQL + services)
+docker compose up -d
+
+# Start only PostgreSQL
+docker compose up postgres -d
+
+# Ingest documents
+docker compose exec techpub python -m cli ingest techpub
+```
+
+Services (`techpub`, `safety`) automatically wait for PostgreSQL to be healthy before starting.
+
 ## Configuration
 
 All configuration is done via environment variables in `.env.<env>` files.
@@ -60,12 +96,19 @@ All configuration is done via environment variables in `.env.<env>` files.
 | Variable | Default | Description |
 |---|---|---|
 | `DOCUMENTS_DIR` | `./documents` | Path to the documents directory |
-| `DATA_DIR` | `./data` | Path to persistent data (ChromaDB, BM25 index) |
+| `DATA_DIR` | `./data` | Path to persistent data |
 | `MODELS_DIR` | `/opt/models` | Path to downloaded models |
 | `INCLUDE_FOLDERS` | *(unset)* | Pipe-separated folder names to include during ingestion |
 | `MCP_SERVER_NAME` | `docling-rag` | MCP server display name |
 | `MCP_PORT` | `9090` | MCP server port |
 | `RAG_DEVICE` | `cuda` | Compute device: `cuda`, `mps`, or `cpu` |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host (`postgres` in Docker) |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `docling_rag` | Database name |
+| `POSTGRES_USER` | `docling` | Database user |
+| `POSTGRES_PASSWORD` | `docling` | Database password |
+| `POSTGRES_POOL_MIN` | `2` | Minimum connection pool size |
+| `POSTGRES_POOL_MAX` | `10` | Maximum connection pool size |
 
 ### Folder Filtering
 

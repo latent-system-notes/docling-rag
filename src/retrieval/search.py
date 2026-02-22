@@ -1,7 +1,6 @@
-from ..config import DEFAULT_TOP_K, COLLECTION_NAME
+from ..config import DEFAULT_TOP_K
 from ..utils import embed
-from ..storage.chroma_client import search_vectors, get_chroma_client
-from ..storage.bm25_index import get_bm25_index
+from ..storage.postgres import search_vectors, search_fulltext, get_chunks_by_ids
 from ..models import Chunk, SearchResult
 
 
@@ -21,20 +20,16 @@ def _make_result(doc_id: str, text: str, metadata: dict, score: float) -> Search
 
 
 def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[SearchResult]:
-    bm25 = get_bm25_index()
-    if bm25.num_docs == 0:
-        bm25._load_statistics()
+    ft_results = search_fulltext(query, top_k=top_k * 3)
 
-    if bm25.num_docs > 0:
-        bm25_results = bm25.search(query, top_k=top_k * 3)
+    if ft_results:
         vector_results = search_vectors(embed(query), top_k * 3)
-        rrf_scores = _reciprocal_rank_fusion([bm25_results, [(h["id"], h["score"]) for h in vector_results]])
+        rrf_scores = _reciprocal_rank_fusion([ft_results, [(h["id"], h["score"]) for h in vector_results]])
         top_ids = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
         batch_ids = [doc_id for doc_id, _ in top_ids]
         if not batch_ids:
             return []
-        collection = get_chroma_client().get_collection(COLLECTION_NAME)
-        data = collection.get(ids=batch_ids)
+        data = get_chunks_by_ids(batch_ids)
         id_to_idx = {cid: i for i, cid in enumerate(data['ids'])}
         results = []
         for doc_id, rrf_score in top_ids:

@@ -6,7 +6,7 @@ from ..utils import embed
 from ..models import IngestionError, DocumentMetadata
 from .chunker import chunk_document
 from .document import extract_metadata, load_document
-from ..storage.chroma_client import add_vectors
+from ..storage.postgres import add_vectors
 
 logger = get_logger(__name__)
 

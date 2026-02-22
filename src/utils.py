@@ -1,6 +1,7 @@
 import fnmatch
 import gc
 import logging
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from .models import EmbeddingError
 logger = get_logger(__name__)
 _console = Console()
 _embedder_cache = None
+_embedder_lock = threading.Lock()
 
 @contextmanager
 def _quiet_logging():
@@ -42,14 +44,17 @@ def get_embedder():
     global _embedder_cache
     if _embedder_cache is not None:
         return _embedder_cache
-    from sentence_transformers import SentenceTransformer
-    local_path = get_embedding_model_path()
-    if not local_path.exists():
-        raise EmbeddingError(f"Embedding model not found at {local_path}. Run 'rag models --download' first.")
-    logger.info(f"Loading embedding model from {local_path}")
-    with _quiet_logging(), _console.status("Loading embedding model..."):
-        _embedder_cache = SentenceTransformer(str(local_path), device=device, local_files_only=True, trust_remote_code=False)
-    return _embedder_cache
+    with _embedder_lock:
+        if _embedder_cache is not None:
+            return _embedder_cache
+        from sentence_transformers import SentenceTransformer
+        local_path = get_embedding_model_path()
+        if not local_path.exists():
+            raise EmbeddingError(f"Embedding model not found at {local_path}. Run 'rag models --download' first.")
+        logger.info(f"Loading embedding model from {local_path}")
+        with _quiet_logging(), _console.status("Loading embedding model..."):
+            _embedder_cache = SentenceTransformer(str(local_path), device=device, local_files_only=True, trust_remote_code=False)
+        return _embedder_cache
 
 def cleanup_embedder() -> None:
     global _embedder_cache
@@ -126,13 +131,17 @@ def managed_resources():
     finally:
         cleanup_all_resources()
 
+_cleanup_done = False
+
 def cleanup_all_resources() -> None:
+    global _cleanup_done
+    if _cleanup_done:
+        return
+    _cleanup_done = True
     cleanup_embedder()
     from .ingestion.chunker import cleanup_chunker
     cleanup_chunker()
-    from .storage.chroma_client import cleanup_chroma_client
-    cleanup_chroma_client()
-    from .storage.bm25_index import get_bm25_index
-    get_bm25_index().close()
+    from .storage.postgres import cleanup_pool
+    cleanup_pool()
     gc.collect()
     _free_cuda_cache()
