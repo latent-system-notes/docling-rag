@@ -12,11 +12,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Install uv (fast Rust-based package manager)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 # Create directories for venv and models (persist inside container)
 RUN mkdir -p /opt/venv /opt/models
 
 # Create venv with system-site-packages (inherits PyTorch from base image)
-RUN python3 -m venv /opt/venv --system-site-packages
+RUN uv venv /opt/venv --system-site-packages --python python3
 
 # Set venv as default Python
 ENV PATH="/opt/venv/bin:$PATH"
@@ -25,39 +28,37 @@ ENV VIRTUAL_ENV="/opt/venv"
 # Set models directory
 ENV MODELS_DIR="/opt/models"
 
-# Copy requirements first (for better Docker layer caching)
+# Copy requirements and constraints first (for better Docker layer caching)
 WORKDIR /workspace/app
-COPY requirements.txt .
+COPY requirements.txt constraints.txt ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Verify PyTorch from base image is intact before installing anything
+RUN python -c "import torch; print(f'Base image PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+
+# Install Python dependencies using uv (much faster than pip under QEMU)
+RUN uv pip install --no-cache -r requirements.txt
+
+# Remove PyPI torch/torchvision/torchaudio from venv — the NVIDIA CUDA-optimized
+# builds in system-site-packages must take precedence
+RUN uv pip uninstall torch torchvision torchaudio 2>/dev/null || true
 
 # Install OCR support
-RUN pip install --no-cache-dir rapidocr-onnxruntime
+RUN uv pip install --no-cache rapidocr-onnxruntime
 
 # Replace opencv with headless version (for container/server use)
-RUN pip uninstall -y opencv-python 2>/dev/null || true && \
-    pip install --no-cache-dir opencv-python-headless
+RUN uv pip uninstall opencv-python 2>/dev/null || true && \
+    uv pip install --no-cache opencv-python-headless
 
-# Download models during build (optional - comment out to download at runtime)
-# Note: This makes the image larger but faster to start
-RUN pip install --no-cache-dir huggingface_hub && \
-    python -c "from sentence_transformers import SentenceTransformer; \
-    import os; os.makedirs('/opt/models/embedding/paraphrase-multilingual-mpnet-base-v2', exist_ok=True); \
-    m = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2'); \
-    m.save('/opt/models/embedding/paraphrase-multilingual-mpnet-base-v2')"
+# Models are NOT baked in — mount them at runtime via volume:
+#   -v /path/to/models:/opt/models
 
-RUN python -c "from huggingface_hub import snapshot_download; \
-    snapshot_download(repo_id='docling-project/docling-layout-heron', revision='main'); \
-    snapshot_download(repo_id='docling-project/docling-models', revision='v2.3.0')"
+# Verify PyTorch was NOT overridden by pip dependency resolution
+RUN python -c "import torch; print(f'Final PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
 
-# Copy application code
-COPY . .
+# App code is also volume-mounted at runtime — don't COPY it
+# This keeps the image lean (only base + venv) and allows code updates without rebuild
 
-# Set environment variables for offline operation
-ENV HF_HUB_OFFLINE=1
-ENV TRANSFORMERS_OFFLINE=1
-ENV HF_DATASETS_OFFLINE=1
+# Set environment variables
 ENV TOKENIZERS_PARALLELISM=false
 
 # Default working directory

@@ -1,0 +1,6 @@
+# Prevent uv/pip from overriding packages pre-installed in the NVIDIA base image.
+# The base image (nvcr.io/nvidia/pytorch) ships CUDA-optimized builds of these;
+# reinstalling from PyPI would break GPU support.
+torch
+torchvision
+torchaudio
