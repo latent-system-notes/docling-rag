@@ -128,6 +128,8 @@ def is_file_modified(file_path: Path, ingested_at_iso: str) -> bool:
 
 @contextmanager
 def managed_resources():
+    global _cleanup_done
+    _cleanup_done = False
     try:
         yield
     finally:

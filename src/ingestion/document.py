@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import io
 import json
 import logging
 import re
@@ -56,14 +57,41 @@ def _get_mime(file_path: Path) -> str:
     ext = file_path.suffix.lower()
     return DOCLING_MIME_TYPES.get(ext, "application/octet-stream")
 
-def _post_convert(url: str, options: dict, files: dict, extra_headers: dict | None = None,
-                   timeout: int = 60) -> httpx.Response:
-    headers = {"Host": "docling.s10.mil.dir"}
-    if extra_headers:
-        headers.update(extra_headers)
-    resp = httpx.post(url, headers=headers, files=files, data=options, verify=False, timeout=timeout)
+def _async_convert(base_url: str, options: dict, files: dict, headers: dict | None = None,
+                    timeout: int = 600, poll_interval: int = 5) -> dict:
+    """Submit async conversion, poll until done, return the result document dict."""
+    merged = {"Host": "docling.s10.mil.dir"}
+    if headers:
+        merged.update(headers)
+
+    # Step 1: Submit
+    resp = httpx.post(f"{base_url}/v1/convert/file/async", headers=merged, files=files,
+                      data=options, verify=False, timeout=60)
     resp.raise_for_status()
-    return resp
+    task_id = resp.json()["task_id"]
+    logger.info(f"Async task submitted: {task_id}")
+
+    # Step 2: Poll
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        poll_resp = httpx.get(f"{base_url}/v1/status/poll/{task_id}",
+                              params={"wait": poll_interval}, headers=merged,
+                              timeout=poll_interval + 10, verify=False)
+        poll_resp.raise_for_status()
+        status = poll_resp.json()["task_status"]
+        if status == "success":
+            break
+        elif status == "failure":
+            raise DocumentLoadError(f"Async conversion failed (task {task_id})")
+    else:
+        raise DocumentLoadError(f"Async conversion timed out after {timeout}s (task {task_id})")
+
+    # Step 3: Fetch result
+    result_resp = httpx.get(f"{base_url}/v1/result/{task_id}", headers=merged,
+                            timeout=60, verify=False)
+    result_resp.raise_for_status()
+    return result_resp.json()["document"]
+
 
 def _get_page_count(source: str | Path) -> int | None:
     if Path(source).suffix.lower() != ".pdf":
@@ -76,7 +104,7 @@ def _get_page_count(source: str | Path) -> int | None:
         return None
 
 CUSTOM_PROMPT = (
-    "Analyze this image through. Describe all visible elements including:"
+    "Analyze this image thoroughly. Describe all visible elements including: "
     "text content, charts, diagrams, tables, graphs, logos, and any visual data. "
     "If there are numbers or labels, include them. Be detailed and precise."
 )
@@ -90,7 +118,12 @@ def _convert_via_api(source: str | Path) -> DoclingDocument:
     headers = {"X-API-Key": api_key} if api_key else {}
     source_path = Path(source)
     timeout = config("DOCLING_SERVE_TIMEOUT") or 600
-    poll_interval = 5
+    mime = _get_mime(source_path)
+    file_bytes = source_path.read_bytes()
+
+    def _make_files():
+        """Create a fresh file-like object for each HTTP request."""
+        return {"files": (source_path.name, io.BytesIO(file_bytes), mime)}
 
     options = {
             "do_picture_description": True,
@@ -108,81 +141,45 @@ def _convert_via_api(source: str | Path) -> DoclingDocument:
             "ocr_engine": "auto"
     }
 
-    files = {
-        "files": (source_path.name, open(source_path, "rb"), _get_mime(source_path)),
-    }
+    logger.info(f"Converting: {source_path.absolute()}")
 
     if Path(source).suffix.lower() == ".pdf":
-        # Prepare a minimal payload for the first three pages (markdown placeholder)
-        pdf_range = copy.deepcopy(options)
-        pdf_range.update(
-            {
-                "page_range": [1, 2],
-                "to_formats": ["md"],
-                "image_export_mode": "placeholder",
-            }
-        )
+        logger.info("PDF detected, running OCR probe on first 2 pages...")
+        probe_opts = copy.deepcopy(options)
+        probe_opts.update({
+            "page_range": [1, 2],
+            "to_formats": ["md"],
+            "image_export_mode": "placeholder",
+        })
 
         def _get_md(do_ocr: bool) -> str:
-            payload = copy.deepcopy(pdf_range)
+            payload = copy.deepcopy(probe_opts)
             payload["do_ocr"] = do_ocr
             payload["force_ocr"] = do_ocr
             payload["do_picture_description"] = do_ocr
             payload["do_picture_classification"] = do_ocr
-            resp = _post_convert(f"{base_url}/v1/convert/file", payload, files)
-            return tidy(resp.json()["document"]["md_content"])
+            doc = _async_convert(base_url, payload, _make_files(), headers, timeout=120)
+            return tidy(doc["md_content"])
 
-        without_ocr = _get_md(False)
-        with_ocr = _get_md(True)
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fut_without = pool.submit(_get_md, False)
+                fut_with = pool.submit(_get_md, True)
+                without_ocr = fut_without.result()
+                with_ocr = fut_with.result()
 
-        # If OCR adds >50% content, enable full OCR for the async conversion
-        if len(without_ocr) == 0:
-            options["force_ocr"] = True
-        elif (len(with_ocr) - len(without_ocr)) / len(without_ocr) > 0.5:
-            options["force_ocr"] = True
+            logger.info(f"OCR probe: without={len(without_ocr)} chars, with={len(with_ocr)} chars")
 
-    logger.info(f"Using full OCR {options["force_ocr"]}")
-    resp = httpx.post(
-        f"{base_url}/v1/convert/file/async",
-        headers={"Host": "docling.s10.mil.dir"},
-        data=options,
-        files=files,
-        verify=False,
-        timeout=60
-    )
+            if len(without_ocr) == 0:
+                options["force_ocr"] = True
+            elif (len(with_ocr) - len(without_ocr)) / len(without_ocr) > 0.5:
+                options["force_ocr"] = True
+        except Exception as e:
+            logger.warning(f"OCR probe failed, defaulting to force_ocr=False: {e}")
 
-    resp.raise_for_status()
-    task_id = resp.json()["task_id"]
-    logger.info(f"Async task submitted: {task_id}")
-
-    # Step 2: Poll for completion
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        poll_resp = httpx.get(
-            f"{base_url}/v1/status/poll/{task_id}",
-            params={"wait": poll_interval},
-            headers=headers,
-            timeout=poll_interval + 10,
-        )
-        poll_resp.raise_for_status()
-        status = poll_resp.json()["task_status"]
-        if status == "success":
-            break
-        elif status == "failure":
-            raise DocumentLoadError(f"Async conversion failed for {source}")
-    else:
-        # Ensure newline before final timeout error
-        raise DocumentLoadError(f"Async conversion timed out after {timeout}s for {source}")
-
-    # Step 3: Fetch result
-    result_resp = httpx.get(
-        f"{base_url}/v1/result/{task_id}",
-        headers=headers,
-        timeout=60,
-    )
-
-    result_resp.raise_for_status()
-    content = result_resp.json()["document"]
+    logger.info(f"Using force_ocr={options['force_ocr']}")
+    content = _async_convert(base_url, options, _make_files(), headers, timeout=timeout)
     return DoclingDocument.model_validate(content["json_content"])
 
 

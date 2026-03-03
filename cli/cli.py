@@ -11,11 +11,23 @@ import typer
 from contextlib import contextmanager
 from dotenv import load_dotenv
 from rich.console import Console
+from rich.logging import RichHandler
 from rich.table import Table
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 app = typer.Typer()
+
+console = Console(force_terminal=True, legacy_windows=False)
+
+# Single RichHandler for all logging — no other handlers anywhere
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%d-%b %H:%M:%S]",
+    handlers=[RichHandler(console=console, show_path=False, markup=False, omit_repeated_times=False)],
+    force=True,
+)
 
 @contextmanager
 def quiet_logging():
@@ -29,8 +41,6 @@ def quiet_logging():
     finally:
         logging.disable(old_disable)
         warnings.filters[:] = old_filter
-
-console = Console(force_terminal=True, legacy_windows=False)
 
 def _truncate(s: str, max_len: int = 55) -> str:
     if len(s) <= max_len: return s
@@ -99,7 +109,7 @@ def ingest(
     dry_run: bool = False,
     force: bool = False,
     folders: str = typer.Option(None, help="Pipe-separated folder names to include (overrides INCLUDE_FOLDERS)"),
-    workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel workers for ingestion")
+    workers: int = typer.Option(3, "--workers", "-w", help="Number of parallel workers for ingestion")
 ):
     _load_env(env)
     from src.config import config, get_logger
@@ -156,8 +166,7 @@ def ingest(
                     return False, True, False
 
         try:
-            with console.status(f"Processing {f.name}..."):
-                meta = ingest_document(f)
+            meta = ingest_document(f)
             console.print(f"[green]{f.name} ({meta.num_chunks} chunks)")
             return True, False, False
         except Exception as e:
@@ -173,7 +182,7 @@ def ingest(
     # ingestion loop ensures they are released even when we run multiple threads.
     with managed_resources():
         # Parallel execution using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=workers) as executor:
+        with console.status(""), ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {executor.submit(_process_file, f): f for f in files}
             for future in as_completed(futures):
                 proc, skip, fail = future.result()

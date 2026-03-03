@@ -1,6 +1,5 @@
 import logging
 import os
-import time
 import warnings
 from pathlib import Path
 
@@ -13,16 +12,7 @@ warnings.filterwarnings("ignore", message=".*Token indices sequence length.*")
 warnings.filterwarnings("ignore", message=".*incorrect regex pattern.*")
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-class _Fmt(logging.Formatter):
-    def formatTime(self, record, datefmt=None):
-        return time.strftime(datefmt, self.converter(record.created)).upper() if datefmt else super().formatTime(record, datefmt)
-
-_h = logging.StreamHandler()
-_h.setFormatter(_Fmt("[%(levelname)s] [%(asctime)s] %(message)s", "%d-%b %H:%M:%S"))
-logging.getLogger().handlers = [_h]
 logging.getLogger().setLevel(logging.INFO)
-# for lib in ["RapidOCR", "transformers", "sentence_transformers", "httpx"]:
-#     logging.getLogger(lib).setLevel(logging.WARNING)
 
 device = os.environ.get("RAG_DEVICE", "cuda").lower()
 
