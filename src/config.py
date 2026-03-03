@@ -42,7 +42,7 @@ except ImportError:
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 EMBEDDING_BATCH_SIZE = 256
 MAX_TOKENS = 512
-DEFAULT_TOP_K = 5
+DEFAULT_TOP_K = 25
 COLLECTION_NAME = "documents"
 MCP_HOST = "0.0.0.0"
 MCP_TRANSPORT = "streamable-http"

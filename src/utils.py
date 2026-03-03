@@ -15,7 +15,7 @@ from .config import device, config, EMBEDDING_BATCH_SIZE, EMBEDDING_MODEL, get_l
 from .models import EmbeddingError
 
 logger = get_logger(__name__)
-_console = Console()
+_console = Console(force_terminal=True, legacy_windows=False)
 _embedder_cache = None
 _embedder_lock = threading.Lock()
 
@@ -52,7 +52,7 @@ def get_embedder():
         if not local_path.exists():
             raise EmbeddingError(f"Embedding model not found at {local_path}. Run 'rag models --download' first.")
         logger.info(f"Loading embedding model from {local_path}")
-        with _quiet_logging(), _console.status("Loading embedding model..."):
+        with _console.status("Loading embedding model..."):
             _embedder_cache = SentenceTransformer(str(local_path), device=device, local_files_only=True, trust_remote_code=False)
         return _embedder_cache
 
@@ -91,30 +91,32 @@ EXCLUDE_PATTERNS = {'.*', '__*', '*.tmp', '*.temp', '~*', '*.bak', '*.backup', '
 def is_supported_file(file_path: Path) -> bool:
     return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
 
-def _in_included_folder(file_path: Path, root_path: Path, include_folders: list[str]) -> bool:
-    """Check if file is inside a folder matching any of the include_folders patterns."""
-    try:
-        rel = file_path.relative_to(root_path)
-    except ValueError:
-        return False
-    # Files directly in root have no parent folder to match
-    if len(rel.parts) < 2:
-        return False
-    return any(
-        fnmatch.fnmatch(part, pattern)
-        for part in rel.parts[:-1]
-        for pattern in include_folders
-    )
-
 def discover_files(root_path: Path, recursive: bool = True, include_folders: list[str] | None = None) -> Iterator[Path]:
-    for f in root_path.glob("**/*" if recursive else "*"):
-        try:
-            if f.is_file() and is_supported_file(f) and not any(fnmatch.fnmatch(f.name, p) for p in EXCLUDE_PATTERNS):
-                if include_folders and not _in_included_folder(f, root_path, include_folders):
+    yielded: set[Path] = set()
+
+    def _process_file(f: Path) -> Iterator[Path]:
+        if f in yielded:
+            return
+        if f.is_file() and is_supported_file(f) and not any(fnmatch.fnmatch(f.name, p) for p in EXCLUDE_PATTERNS):
+            yielded.add(f)
+            yield f
+
+    if include_folders:
+        # Iterate over each include folder pattern and glob only within those folders
+        for folder_pat in include_folders:
+            for folder in root_path.glob(f"**/{folder_pat}"):
+                if not folder.is_dir():
                     continue
-                yield f
-        except (PermissionError, OSError):
-            continue
+                pattern = "**/*" if recursive else "*"
+                for f in folder.glob(pattern):
+                    for result in _process_file(f):
+                        yield result
+    else:
+        # No folder restriction – fall back to original behaviour
+        pattern = "**/*" if recursive else "*"
+        for f in root_path.glob(pattern):
+            for result in _process_file(f):
+                yield result
 
 def is_file_modified(file_path: Path, ingested_at_iso: str) -> bool:
     if ingested_at_iso == 'unknown':
@@ -135,13 +137,19 @@ _cleanup_done = False
 
 def cleanup_all_resources() -> None:
     global _cleanup_done
+    _console.print("[cyan]Cleaning up resources...[/cyan]")
     if _cleanup_done:
         return
     _cleanup_done = True
+    _console.print("[cyan]Cleaning up embedder...[/cyan]")
     cleanup_embedder()
     from .ingestion.chunker import cleanup_chunker
+    _console.print("[cyan]Cleaning up chunker...[/cyan]")
     cleanup_chunker()
     from .storage.postgres import cleanup_pool
+    _console.print("[cyan]Cleaning up connection pool ...[/cyan]")
     cleanup_pool()
+    _console.print("[cyan]Cleaning up gc ...[/cyan]")
     gc.collect()
+    _console.print("[cyan]Cleaning up cuda ...[/cyan]")
     _free_cuda_cache()

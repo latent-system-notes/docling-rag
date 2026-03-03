@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 app = typer.Typer()
 
@@ -91,8 +93,14 @@ def remove(env: str, doc_id: str, yes: bool = typer.Option(False, "-y")):
 
 
 @app.command()
-def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool = False,
-           folders: str = typer.Option(None, help="Pipe-separated folder names to include (overrides INCLUDE_FOLDERS)")):
+def ingest(
+    env: str,
+    recursive: bool = True,
+    dry_run: bool = False,
+    force: bool = False,
+    folders: str = typer.Option(None, help="Pipe-separated folder names to include (overrides INCLUDE_FOLDERS)"),
+    workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel workers for ingestion")
+):
     _load_env(env)
     from src.config import config, get_logger
     from src.ingestion.pipeline import ingest_document
@@ -128,29 +136,58 @@ def ingest(env: str, recursive: bool = True, dry_run: bool = False, force: bool 
         files = discover_files(doc_path, recursive=recursive, include_folders=include_folders)
         console.print(f"[cyan]Scanning {doc_path}...[/cyan]")
 
+    # Safety: use a lock for thread‑safe checks against the DB and shared resources
+    lock = threading.Lock()
     processed, skipped, failed = 0, 0, 0
-    with managed_resources():
-        for f in files:
-            if dry_run:
-                console.print(f"  + {f.name}")
-                processed += 1
-                if processed >= 20:
-                    console.print("  ... (dry-run limited to 20)")
-                    break
-                continue
 
-            if not force and document_exists(f):
-                skipped += 1
-                continue
-            try:
-                with console.status(f"Processing {f.name}..."):
-                    meta = ingest_document(f)
-                processed += 1
-                console.print(f"[green]{f.name} ({meta.num_chunks} chunks)")
-            except Exception as e:
-                failed += 1
-                logger.error(f"{f.name}: {e}")
-                console.print(f"[red]{f.name}: {e}")
+    def _process_file(f: Path):
+        """
+        Process a single file.
+        Returns a tuple (processed: bool, skipped: bool, failed: bool).
+        """
+        if dry_run:
+            console.print(f"  + {f.name}")
+            return True, False, False
+
+        # Check existence in a thread‑safe manner
+        if not force:
+            with lock:
+                if document_exists(f):
+                    return False, True, False
+
+        try:
+            with console.status(f"Processing {f.name}..."):
+                meta = ingest_document(f)
+            console.print(f"[green]{f.name} ({meta.num_chunks} chunks)")
+            return True, False, False
+        except Exception as e:
+            logger.error(f"{f.name}: {e}")
+            console.print(f"[red]{f.name}: {e}")
+            return False, False, True
+
+    # ----------------------------------------------------------------------
+    # Resource management
+    # ----------------------------------------------------------------------
+    # All resources (database connections, embedder cache, etc.) are created
+    # inside the ``managed_resources`` context manager. Wrapping the parallel
+    # ingestion loop ensures they are released even when we run multiple threads.
+    with managed_resources():
+        # Parallel execution using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_process_file, f): f for f in files}
+            for future in as_completed(futures):
+                proc, skip, fail = future.result()
+                if proc:
+                    processed += 1
+                if skip:
+                    skipped += 1
+                if fail:
+                    failed += 1
+
+        console.print("[cyan]ThreadPoolExecutor completed ...[/cyan]")
+
+    logger.info("Resource cleanup finished.")
+    console.print("[green]All resources cleaned up successfully.[/green]")
 
     console.print(f"\n[bold]Done:[/bold] {processed} processed, {skipped} skipped, {failed} failed")
 

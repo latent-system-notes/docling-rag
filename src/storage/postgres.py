@@ -6,7 +6,7 @@ import numpy as np
 from psycopg_pool import ConnectionPool
 from pgvector.psycopg import register_vector
 
-from ..config import config, COLLECTION_NAME, EMBEDDING_MODEL, get_logger
+from ..config import config, COLLECTION_NAME, EMBEDDING_MODEL, get_logger, DEFAULT_TOP_K
 from ..models import StorageError
 
 logger = get_logger(__name__)
@@ -117,7 +117,7 @@ def search_vectors(query_vector: np.ndarray, top_k: int) -> list[dict]:
         raise StorageError(f"Failed to search vectors: {e}") from e
 
 
-def search_fulltext(query: str, top_k: int = 10) -> list[tuple[str, float]]:
+def search_fulltext(query: str, top_k: int = DEFAULT_TOP_K) -> list[tuple[str, float]]:
     tokens = query.lower().split()
     if not tokens:
         return []
