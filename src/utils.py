@@ -15,6 +15,32 @@ from .config import device, config, EMBEDDING_BATCH_SIZE, EMBEDDING_MODEL, get_l
 from .models import EmbeddingError
 
 logger = get_logger(__name__)
+
+
+def make_doc_id(file_path: str | Path) -> str:
+    """Compute a stable doc_id from file_path.
+
+    Uses the normalized display path (forward slashes, relative to DOCUMENTS_DIR)
+    so the same file produces the same doc_id on Windows and Linux.
+    """
+    import hashlib
+    return hashlib.md5(display_path(file_path).encode()).hexdigest()
+
+
+def display_path(file_path: str | Path) -> str:
+    """Return a normalized path with forward slashes, relative to DOCUMENTS_DIR.
+
+    Falls back to the path as-given if not inside DOCUMENTS_DIR.
+    """
+    fp = Path(file_path)
+    try:
+        docs_dir = config("DOCUMENTS_DIR")
+        docs_dir_resolved = Path(docs_dir).resolve()
+        rel = fp.resolve().relative_to(docs_dir_resolved)
+        prefix = str(docs_dir).replace("\\", "/").rstrip("/")
+        return prefix + "/" + str(rel).replace("\\", "/")
+    except (ValueError, TypeError):
+        return str(fp).replace("\\", "/")
 _console = Console(force_terminal=True, legacy_windows=False)
 _embedder_cache = None
 _embedder_lock = threading.Lock()

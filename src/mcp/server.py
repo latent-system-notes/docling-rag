@@ -18,13 +18,13 @@ def run_server():
     mcp = FastMCP(name=server_name, instructions=config("MCP_INSTRUCTIONS"))
 
     @mcp.tool(name="search_documents", description=config("MCP_TOOL_QUERY_DESC"))
-    async def search_documents(query: str, max_results: int = 5) -> QueryResult:
-        return Query(query, max_results)
+    async def search_documents(query: str, max_results: int = 5, groups: list[str] | None = None) -> QueryResult:
+        return Query(query, max_results, groups=groups)
 
     @mcp.tool(name="list_all_documents", description=config("MCP_TOOL_LIST_DOCS_DESC"))
-    async def list_all_documents(limit: int | None = 50, offset: int = 0) -> dict:
+    async def list_all_documents(limit: int | None = 50, offset: int = 0, groups: list[str] | None = None) -> dict:
         from ..storage.postgres import get_document_count
-        docs = list_documents(limit=limit, offset=offset)
+        docs = list_documents(limit=limit, offset=offset, groups=groups)
         return {"documents": docs, "total": get_document_count(), "showing": len(docs), "offset": offset}
 
     atexit.register(cleanup_all_resources)

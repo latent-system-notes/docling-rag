@@ -27,3 +27,12 @@ langdetect
 
 # MCP server
 fastmcp
+
+# Dashboard API
+fastapi
+uvicorn
+
+# Auth
+bcrypt
+pyjwt
+ldap3

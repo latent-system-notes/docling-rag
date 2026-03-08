@@ -202,13 +202,15 @@ def ingest(
 
 
 @app.command()
-def query(env: str, query_text: str, top_k: int = None, format: str = "json"):
+def query(env: str, query_text: str, top_k: int = None, format: str = "json",
+          groups: str = typer.Option(None, help="Comma-separated group names for RBAC filtering")):
     _load_env(env)
     from src.config import DEFAULT_TOP_K
     from src.query import query as query_fn
     import json
 
-    r = query_fn(query_text, top_k or DEFAULT_TOP_K)
+    group_list = [g.strip() for g in groups.split(",") if g.strip()] if groups else None
+    r = query_fn(query_text, top_k or DEFAULT_TOP_K, groups=group_list)
     if format == "json":
         out = {"query": r.query, "total_results": len(r.context), "results": [
             {"rank": i, "score": round(x.score, 4), "text": x.chunk.text,
@@ -273,6 +275,212 @@ def models(download: bool = False, verify: bool = False):
         console.print(f"Embedding model ({path}): {status}")
     else:
         console.print("[yellow]Use --download to download models or --verify to check status")
+
+
+# ============================================================
+# RBAC management commands
+# ============================================================
+
+@app.command("add-group")
+def add_group(env: str, name: str, description: str = ""):
+    _load_env(env)
+    from src.storage.postgres import create_collection, create_group
+    create_collection()
+    g = create_group(name, description)
+    console.print(f"[green]Group created: {g['name']} (id={g['id']})")
+
+
+@app.command("list-groups")
+def list_groups_cmd(env: str):
+    _load_env(env)
+    from src.storage.postgres import create_collection, list_groups
+    create_collection()
+    groups = list_groups()
+    if not groups:
+        console.print("[yellow]No groups found")
+        return
+    t = Table(title="Groups", box=None)
+    t.add_column("ID", style="dim", width=6)
+    t.add_column("Name", style="cyan")
+    t.add_column("Description", style="white")
+    for g in groups:
+        t.add_row(str(g["id"]), g["name"], g["description"])
+    console.print(t)
+
+
+@app.command("add-user")
+def add_user(env: str, username: str, password: str = typer.Option(None),
+             display_name: str = "", email: str = "",
+             admin: bool = False, auth_type: str = "local"):
+    _load_env(env)
+    from src.auth.auth import hash_password
+    from src.storage.postgres import create_collection, create_user
+    create_collection()
+    pw_hash = hash_password(password) if password else None
+    if auth_type == "local" and not pw_hash:
+        console.print("[red]Password required for local users")
+        raise typer.Exit(1)
+    u = create_user(username, pw_hash, display_name, email, admin, auth_type)
+    console.print(f"[green]User created: {u['username']} (id={u['id']}, admin={u['is_admin']})")
+
+
+@app.command("list-users")
+def list_users_cmd(env: str):
+    _load_env(env)
+    from src.storage.postgres import create_collection, list_users
+    create_collection()
+    users = list_users()
+    if not users:
+        console.print("[yellow]No users found")
+        return
+    t = Table(title="Users", box=None)
+    t.add_column("ID", style="dim", width=6)
+    t.add_column("Username", style="cyan")
+    t.add_column("Name", style="white")
+    t.add_column("Admin", style="magenta", width=6)
+    t.add_column("Active", style="green", width=6)
+    t.add_column("Auth", style="blue", width=6)
+    for u in users:
+        t.add_row(str(u["id"]), u["username"], u["display_name"],
+                  str(u["is_admin"]), str(u["is_active"]), u["auth_type"])
+    console.print(t)
+
+
+@app.command("assign-group")
+def assign_group_cmd(env: str, username: str, group_name: str):
+    _load_env(env)
+    from src.storage.postgres import create_collection, get_user_by_username, assign_user_to_group, list_groups
+    create_collection()
+    user = get_user_by_username(username)
+    if not user:
+        console.print(f"[red]User not found: {username}")
+        raise typer.Exit(1)
+    groups = list_groups()
+    group = next((g for g in groups if g["name"] == group_name), None)
+    if not group:
+        console.print(f"[red]Group not found: {group_name}")
+        raise typer.Exit(1)
+    assign_user_to_group(user["id"], group["id"])
+    console.print(f"[green]Assigned {username} → {group_name}")
+
+
+@app.command("assign-path")
+def assign_path_cmd(env: str, path: str, group_name: str):
+    _load_env(env)
+    from src.storage.postgres import create_collection, add_path_permission, list_groups
+    create_collection()
+    groups = list_groups()
+    group = next((g for g in groups if g["name"] == group_name), None)
+    if not group:
+        console.print(f"[red]Group not found: {group_name}")
+        raise typer.Exit(1)
+    add_path_permission(path, group["id"])
+    console.print(f"[green]Path permission: {path} → {group_name}")
+
+
+@app.command("list-permissions")
+def list_permissions_cmd(env: str):
+    _load_env(env)
+    from src.storage.postgres import create_collection, list_path_permissions
+    create_collection()
+    perms = list_path_permissions()
+    if not perms:
+        console.print("[yellow]No path permissions found")
+        return
+    t = Table(title="Path Permissions", box=None)
+    t.add_column("Path", style="cyan")
+    t.add_column("Group", style="magenta")
+    for p in perms:
+        t.add_row(p["path"], p["group_name"])
+    console.print(t)
+
+
+@app.command("reset-password")
+def reset_password_cmd(env: str, username: str, new_password: str = typer.Option(..., prompt=True, hide_input=True)):
+    _load_env(env)
+    from src.auth.auth import hash_password
+    from src.storage.postgres import create_collection, get_user_by_username, update_user
+    create_collection()
+    user = get_user_by_username(username)
+    if not user:
+        console.print(f"[red]User not found: {username}")
+        raise typer.Exit(1)
+    update_user(user["id"], password_hash=hash_password(new_password), must_change_password=True)
+    console.print(f"[green]Password reset for {username}. User will be prompted to change on next login.")
+
+
+@app.command("fix-paths")
+def fix_paths_cmd(env: str):
+    """Normalize all paths to forward slashes, recompute doc_id and document_permissions."""
+    _load_env(env)
+    from src.storage.postgres import create_collection, get_pool
+    create_collection()
+    with get_pool().connection() as conn:
+        # 1. Normalize file_path in chunks
+        cur = conn.execute(r"UPDATE chunks SET file_path = REPLACE(file_path, '\', '/') WHERE file_path LIKE '%\\%'")
+        chunks_fixed = cur.rowcount
+        console.print(f"  Normalized {chunks_fixed} chunk file_paths")
+
+        # 2. Normalize path in path_permissions
+        cur = conn.execute(r"UPDATE path_permissions SET path = RTRIM(REPLACE(path, '\', '/'), '/') WHERE path LIKE '%\\%' OR path LIKE '%/'")
+        perms_fixed = cur.rowcount
+        console.print(f"  Normalized {perms_fixed} permission paths")
+
+        # 3. Deduplicate path_permissions
+        conn.execute("DELETE FROM path_permissions pp WHERE pp.id NOT IN (SELECT MIN(id) FROM path_permissions GROUP BY path, group_id)")
+
+        # 4. Recompute doc_id = md5(file_path) so it's based on normalized path
+        conn.execute("""
+            CREATE TEMP TABLE doc_id_map AS
+            SELECT DISTINCT doc_id AS old_doc_id, md5(file_path) AS new_doc_id
+            FROM chunks WHERE doc_id != md5(file_path)
+        """)
+        cur = conn.execute("SELECT COUNT(*) FROM doc_id_map")
+        docs_to_fix = cur.fetchone()[0]
+        if docs_to_fix > 0:
+            conn.execute("UPDATE chunks c SET doc_id = m.new_doc_id FROM doc_id_map m WHERE c.doc_id = m.old_doc_id")
+            conn.execute("UPDATE document_permissions dp SET doc_id = m.new_doc_id FROM doc_id_map m WHERE dp.doc_id = m.old_doc_id")
+            console.print(f"  Recomputed doc_id for {docs_to_fix} documents")
+        else:
+            console.print(f"  All doc_ids already consistent")
+        conn.execute("DROP TABLE doc_id_map")
+
+        # 5. Recompute document_permissions
+        conn.execute("TRUNCATE document_permissions")
+        cur = conn.execute("""
+            INSERT INTO document_permissions (doc_id, group_id)
+            SELECT DISTINCT c.doc_id, pp.group_id
+            FROM (SELECT DISTINCT doc_id, file_path FROM chunks) c
+            JOIN path_permissions pp
+              ON c.file_path = pp.path
+              OR c.file_path LIKE pp.path || '/%'
+            ON CONFLICT (doc_id, group_id) DO NOTHING
+        """)
+        doc_perms = cur.rowcount
+        conn.commit()
+    console.print(f"[green]Done! {doc_perms} document permission entries computed")
+
+
+@app.command("refresh-permissions")
+def refresh_permissions_cmd(env: str):
+    _load_env(env)
+    from src.storage.postgres import create_collection, refresh_all_document_permissions
+    create_collection()
+    count = refresh_all_document_permissions()
+    console.print(f"[green]Refreshed permissions for {count} documents")
+
+
+@app.command()
+def dashboard(env: str):
+    _load_env(env)
+    from src.config import config
+    from src.storage.postgres import create_collection
+    create_collection()
+    import uvicorn
+    from src.dashboard.app import create_app
+    port = int(config("DASHBOARD_PORT") or 8080)
+    console.print(f"[green]Starting dashboard on http://0.0.0.0:{port}")
+    uvicorn.run(create_app(), host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

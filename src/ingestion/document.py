@@ -17,7 +17,7 @@ from docling_core.types.doc import DoclingDocument
 
 from ..config import config, get_logger
 from ..models import DocumentLoadError, DocumentMetadata
-from ..utils import detect_language
+from ..utils import detect_language, make_doc_id
 
 logger = get_logger(__name__)
 
@@ -58,37 +58,35 @@ def _get_mime(file_path: Path) -> str:
     return DOCLING_MIME_TYPES.get(ext, "application/octet-stream")
 
 def _async_convert(base_url: str, options: dict, files: dict, headers: dict | None = None,
-                    timeout: int = 600, poll_interval: int = 5) -> dict:
-    """Submit async conversion, poll until done, return the result document dict."""
+                    poll_interval: int = 5) -> dict:
+    """Submit async conversion, poll until done, return the result document dict. No timeout — waits indefinitely."""
     merged = {"Host": "docling.s10.mil.dir"}
     if headers:
         merged.update(headers)
 
     # Step 1: Submit
     resp = httpx.post(f"{base_url}/v1/convert/file/async", headers=merged, files=files,
-                      data=options, verify=False, timeout=60)
+                      data=options, verify=False, timeout=None)
     resp.raise_for_status()
     task_id = resp.json()["task_id"]
     logger.info(f"Async task submitted: {task_id}")
 
-    # Step 2: Poll
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    # Step 2: Poll (with client-side delay to avoid overwhelming the server)
+    while True:
         poll_resp = httpx.get(f"{base_url}/v1/status/poll/{task_id}",
                               params={"wait": poll_interval}, headers=merged,
-                              timeout=poll_interval + 10, verify=False)
+                              timeout=None, verify=False)
         poll_resp.raise_for_status()
         status = poll_resp.json()["task_status"]
         if status == "success":
             break
         elif status == "failure":
             raise DocumentLoadError(f"Async conversion failed (task {task_id})")
-    else:
-        raise DocumentLoadError(f"Async conversion timed out after {timeout}s (task {task_id})")
+        time.sleep(poll_interval)
 
     # Step 3: Fetch result
     result_resp = httpx.get(f"{base_url}/v1/result/{task_id}", headers=merged,
-                            timeout=60, verify=False)
+                            timeout=None, verify=False)
     result_resp.raise_for_status()
     return result_resp.json()["document"]
 
@@ -105,8 +103,11 @@ def _get_page_count(source: str | Path) -> int | None:
 
 CUSTOM_PROMPT = (
     "Analyze this image thoroughly. Describe all visible elements including: "
-    "text content, charts, diagrams, tables, graphs, logos, and any visual data. "
-    "If there are numbers or labels, include them. Be detailed and precise."
+    "text content (in any language, including Arabic, English, and other scripts), "
+    "charts, diagrams, tables, graphs, logos, and any visual data. "
+    "If there are numbers or labels, include them. "
+    "If there is Arabic text, transcribe it accurately in Arabic script. "
+    "Be detailed and precise."
 )
 
 def tidy(s: str) -> str:
@@ -117,7 +118,6 @@ def _convert_via_api(source: str | Path) -> DoclingDocument:
     api_key = config("DOCLING_SERVE_API_KEY")
     headers = {"X-API-Key": api_key} if api_key else {}
     source_path = Path(source)
-    timeout = config("DOCLING_SERVE_TIMEOUT") or 600
     mime = _get_mime(source_path)
     file_bytes = source_path.read_bytes()
 
@@ -156,9 +156,10 @@ def _convert_via_api(source: str | Path) -> DoclingDocument:
             payload = copy.deepcopy(probe_opts)
             payload["do_ocr"] = do_ocr
             payload["force_ocr"] = do_ocr
-            payload["do_picture_description"] = do_ocr
-            payload["do_picture_classification"] = do_ocr
-            doc = _async_convert(base_url, payload, _make_files(), headers, timeout=120)
+            # Disable picture features in BOTH probes for a fair text-only comparison
+            payload["do_picture_description"] = False
+            payload["do_picture_classification"] = False
+            doc = _async_convert(base_url, payload, _make_files(), headers)
             return tidy(doc["md_content"])
 
         try:
@@ -179,7 +180,7 @@ def _convert_via_api(source: str | Path) -> DoclingDocument:
             logger.warning(f"OCR probe failed, defaulting to force_ocr=False: {e}")
 
     logger.info(f"Using force_ocr={options['force_ocr']}")
-    content = _async_convert(base_url, options, _make_files(), headers, timeout=timeout)
+    content = _async_convert(base_url, options, _make_files(), headers)
     return DoclingDocument.model_validate(content["json_content"])
 
 
@@ -201,7 +202,7 @@ def load_document(source: str | Path) -> tuple[DoclingDocument, int | None]:
 def extract_metadata(doc: DoclingDocument, file_path: str | Path, num_chunks: int,
                      num_pages: int | None = None) -> DocumentMetadata:
     file_path = Path(file_path)
-    doc_id = hashlib.md5(str(file_path.absolute()).encode()).hexdigest()
+    doc_id = make_doc_id(file_path)
     doc_type = file_path.suffix.lstrip(".").lower() or "unknown"
 
     language = "unknown"

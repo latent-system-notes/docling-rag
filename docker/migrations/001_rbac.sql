@@ -1,30 +1,8 @@
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Migration 001: RBAC tables for existing databases
+-- Run this manually if you already have a running docling_rag database.
+-- New installations get these tables from docker/init.sql automatically.
 
--- ============================================================
--- Core: document chunks with vector + full-text search
--- ============================================================
-CREATE TABLE IF NOT EXISTS chunks (
-    id          TEXT PRIMARY KEY,
-    doc_id      TEXT NOT NULL,
-    text        TEXT NOT NULL,
-    embedding   vector(768),
-    text_search tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED,
-    page_num    INTEGER,
-    doc_type    TEXT NOT NULL DEFAULT 'unknown',
-    language    TEXT NOT NULL DEFAULT 'unknown',
-    file_path   TEXT NOT NULL,
-    ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    chunk_index INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX IF NOT EXISTS idx_chunks_text_search ON chunks USING gin (text_search);
-CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks (doc_id);
-CREATE INDEX IF NOT EXISTS idx_chunks_ingested_at ON chunks (ingested_at DESC);
-
--- ============================================================
--- RBAC: users, groups, permissions
--- ============================================================
+BEGIN;
 
 CREATE TABLE IF NOT EXISTS groups (
     id          SERIAL PRIMARY KEY,
@@ -36,13 +14,13 @@ CREATE TABLE IF NOT EXISTS groups (
 CREATE TABLE IF NOT EXISTS users (
     id                   SERIAL PRIMARY KEY,
     username             TEXT UNIQUE NOT NULL,
-    password_hash        TEXT,                              -- NULL for LDAP-only users
+    password_hash        TEXT,
     display_name         TEXT DEFAULT '',
     email                TEXT DEFAULT '',
     is_admin             BOOLEAN NOT NULL DEFAULT FALSE,
     is_active            BOOLEAN NOT NULL DEFAULT TRUE,
-    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,    -- force password change on next login
-    auth_type            TEXT NOT NULL DEFAULT 'local'      -- 'local' or 'ldap'
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+    auth_type            TEXT NOT NULL DEFAULT 'local'
         CHECK (auth_type IN ('local', 'ldap')),
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -56,20 +34,19 @@ CREATE TABLE IF NOT EXISTS user_groups (
 
 CREATE TABLE IF NOT EXISTS path_permissions (
     id         SERIAL PRIMARY KEY,
-    path       TEXT NOT NULL,                        -- folder or file path node
+    path       TEXT NOT NULL,
     group_id   INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (path, group_id)
 );
 
 CREATE TABLE IF NOT EXISTS document_permissions (
-    doc_id     TEXT NOT NULL,                        -- matches chunks.doc_id
+    doc_id     TEXT NOT NULL,
     group_id   INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (doc_id, group_id)
 );
 
--- RBAC indexes
 CREATE INDEX IF NOT EXISTS idx_user_groups_user ON user_groups (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_groups_group ON user_groups (group_id);
 CREATE INDEX IF NOT EXISTS idx_path_permissions_path ON path_permissions (path);
@@ -77,7 +54,9 @@ CREATE INDEX IF NOT EXISTS idx_path_permissions_group ON path_permissions (group
 CREATE INDEX IF NOT EXISTS idx_document_permissions_doc ON document_permissions (doc_id);
 CREATE INDEX IF NOT EXISTS idx_document_permissions_group ON document_permissions (group_id);
 
--- Default admin user (password: p@ssw0rd — change immediately!)
+-- Default admin user (password: p@ssw0rd)
 INSERT INTO users (username, password_hash, display_name, is_admin, auth_type)
 VALUES ('admin', '$2b$12$3J2nk5UcD5Jb5.6eRVeo0eJudwcjThFv1MQ4ajFMT6PykIgofezgK', 'Administrator', TRUE, 'local')
 ON CONFLICT (username) DO NOTHING;
+
+COMMIT;

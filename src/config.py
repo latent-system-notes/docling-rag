@@ -51,9 +51,49 @@ _ENV_DEFAULTS = {
     "POSTGRES_PASSWORD": "docling",
     "POSTGRES_POOL_MIN": "2",
     "POSTGRES_POOL_MAX": "10",
-    "MCP_INSTRUCTIONS": "Do not write JSON in your response, because it will be shown as broken text and the tool will not be called; instead, call the tool only once using the MCP function calling format, make a summary after that first call, and never make a second search. For every user question except “list all documents,” you must always call search_documents(query, max_results=10), and if the user asks for a list of all documents, call list_all_documents() instead. Build your answer only from the data returned by the tool call and never use your own knowledge or memory. If no relevant results are found, tell the user the information is not in the knowledge base and ask them to rephrase the question with more specific terms, such as exact JAC REG or SGL numbers. Every fact, rule, or procedure must include citations with the document name and page number (for example, [JAC REG 385-7, Page 23]), include multiple citations if needed, and show the exact original cited text without opening the document unless the user asks.",
-    "MCP_TOOL_QUERY_DESC": "Do not write JSON in your response, because it will appear as broken text and the tool will not be called; instead, call the tool only once using the specified MCP function format, make a summary after that call, and do not perform any additional searches beyond the initial search_documents() call. For every user query except “list all documents” or “open a document,” you must invoke search_documents() first and build your answer only from the data it returns, without adding any model knowledge. If no relevant results are found, clearly state that the information is not in the knowledge base and ask the user to rephrase the question with more specific terms, such as exact JAC REG or SGL numbers. Every fact, requirement, or procedure must include citations showing the document name and page number (for example, [JAC REG 385-7, Page 23]), include multiple citations when needed, and display the exact original cited text without opening the document unless the user requests it.",
-    "MCP_TOOL_LIST_DOCS_DESC": "Do not write JSON in your response, as it will appear as broken text and the tool will not be called; instead, call the tool only once using the specified function format, do not make any additional searches, and create a summary using only the information returned by search_documents(). For every user query except “list all documents” or “open a document,” you must invoke search_documents() first and build the answer strictly from its results without adding any model knowledge. If no relevant information is found, clearly state that it is not available in the knowledge base and ask the user to rephrase the question with more specific terms, such as exact JAC REG or SGL numbers. Every fact, requirement, or procedure must include citations showing the document name and page number (for example, [JAC REG 385-7, Page 23]), include multiple citations when applicable, and display the exact original cited text without opening the document unless the user requests it.",
+    "MCP_INSTRUCTIONS": (
+        "Do not write JSON in your response, because it will be shown as broken text and the tool will not be called; "
+        "instead, call the tool only once using the MCP function calling format, make a summary after that first call, "
+        "and never make a second search. For every user question except 'list all documents,' you must always call "
+        "search_documents(query, max_results=10), and if the user asks for a list of all documents, call "
+        "list_all_documents() instead. Build your answer only from the data returned by the tool call and never use "
+        "your own knowledge or memory. If no relevant results are found, tell the user the information is not in the "
+        "knowledge base and ask them to rephrase the question with more specific terms, such as exact JAC REG or SGL "
+        "numbers. Every fact, rule, or procedure must include citations with the document name and page number "
+        "(for example, [JAC REG 385-7, Page 23]), include multiple citations if needed, and show the exact original "
+        "cited text without opening the document unless the user asks."
+    ),
+    "MCP_TOOL_QUERY_DESC": (
+        "Do not write JSON in your response, because it will appear as broken text and the tool will not be called; "
+        "instead, call the tool only once using the specified MCP function format, make a summary after that call, "
+        "and do not perform any additional searches beyond the initial search_documents() call. For every user query "
+        "except 'list all documents' or 'open a document,' you must invoke search_documents() first and build your "
+        "answer only from the data it returns, without adding any model knowledge. If no relevant results are found, "
+        "clearly state that the information is not in the knowledge base and ask the user to rephrase the question "
+        "with more specific terms, such as exact JAC REG or SGL numbers. Every fact, requirement, or procedure must "
+        "include citations showing the document name and page number (for example, [JAC REG 385-7, Page 23]), "
+        "include multiple citations when needed, and display the exact original cited text without opening the "
+        "document unless the user requests it."
+    ),
+    "MCP_TOOL_LIST_DOCS_DESC": (
+        "Do not write JSON in your response, as it will appear as broken text and the tool will not be called; "
+        "instead, call the tool only once using the specified function format, do not make any additional searches, "
+        "and create a summary using only the information returned by search_documents(). For every user query except "
+        "'list all documents' or 'open a document,' you must invoke search_documents() first and build the answer "
+        "strictly from its results without adding any model knowledge. If no relevant information is found, clearly "
+        "state that it is not available in the knowledge base and ask the user to rephrase the question with more "
+        "specific terms, such as exact JAC REG or SGL numbers. Every fact, requirement, or procedure must include "
+        "citations showing the document name and page number (for example, [JAC REG 385-7, Page 23]), include "
+        "multiple citations when applicable, and display the exact original cited text without opening the document "
+        "unless the user requests it."
+    ),
+    # LDAP
+    "LDAP_URL": "",
+    "LDAP_BASE_DN": "",
+    "LDAP_BIND_DN": "",
+    # Dashboard
+    "DASHBOARD_SECRET": "change-me-in-production",
+    "DASHBOARD_PORT": "8080",
 }
 
 def config(key: str):

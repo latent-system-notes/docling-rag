@@ -19,11 +19,11 @@ def _make_result(doc_id: str, text: str, metadata: dict, score: float) -> Search
         score=float(score), distance=1.0 - float(score))
 
 
-def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[SearchResult]:
-    ft_results = search_fulltext(query, top_k=top_k * 3)
+def search(query: str, top_k: int = DEFAULT_TOP_K, groups: list[str] | None = None) -> list[SearchResult]:
+    ft_results = search_fulltext(query, top_k=top_k * 3, groups=groups)
 
     if ft_results:
-        vector_results = search_vectors(embed(query), top_k * 3)
+        vector_results = search_vectors(embed(query), top_k * 3, groups=groups)
         rrf_scores = _reciprocal_rank_fusion([ft_results, [(h["id"], h["score"]) for h in vector_results]])
         top_ids = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
         batch_ids = [doc_id for doc_id, _ in top_ids]
@@ -39,5 +39,5 @@ def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[SearchResult]:
         del data
         return results
 
-    raw = search_vectors(embed(query), top_k)
+    raw = search_vectors(embed(query), top_k, groups=groups)
     return [_make_result(h["id"], h.get("text", ""), h, h.get("score", 0.0)) for h in raw]
