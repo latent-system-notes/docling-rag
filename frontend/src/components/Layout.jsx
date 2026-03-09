@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Users, Shield, FolderTree, LogOut, Search, FileText, Menu, X, PanelLeftClose } from 'lucide-react'
+import { Users, Shield, FolderTree, LogOut, Search, FileText, Menu, X, PanelLeftClose, Settings, Upload } from 'lucide-react'
 
 export default function Layout() {
   const navigate = useNavigate()
@@ -72,6 +72,12 @@ export default function Layout() {
             </NavLink>
             <NavLink to="/permissions" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
               <FolderTree size={18} /> Permissions
+            </NavLink>
+            <NavLink to="/ingestion" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
+              <Upload size={18} /> Ingestion
+            </NavLink>
+            <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
+              <Settings size={18} /> Settings
             </NavLink>
           </>
         )}

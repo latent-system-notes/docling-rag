@@ -70,4 +70,20 @@ export const api = {
   // Search (user-facing, auto-filtered by groups)
   search: (q, topK = 10) => request(`/search?q=${encodeURIComponent(q)}&top_k=${topK}`),
   myDocuments: (limit = 50, offset = 0) => request(`/search/documents?limit=${limit}&offset=${offset}`),
+
+  // Settings
+  getSettings: () => request('/settings'),
+  updateSetting: (key, value) =>
+    request(`/settings/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify({ value }) }),
+  deleteSetting: (key) =>
+    request(`/settings/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+  reloadMcp: () =>
+    request('/settings/reload-mcp', { method: 'POST' }),
+
+  // Ingestion
+  startIngestion: (opts = {}) =>
+    request('/ingestion/start', { method: 'POST', body: JSON.stringify(opts) }),
+  getIngestionStatus: () => request('/ingestion/status'),
+  getIngestionLogs: (offset = 0) => request(`/ingestion/logs?offset=${offset}`),
+  cancelIngestion: () => request('/ingestion/cancel', { method: 'POST' }),
 }

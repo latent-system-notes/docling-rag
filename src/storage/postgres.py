@@ -677,6 +677,80 @@ def get_document_permissions(doc_id: str) -> list[dict]:
         raise StorageError(f"Failed to get document permissions: {e}") from e
 
 
+# ============================================================
+# Settings
+# ============================================================
+
+def ensure_settings_table() -> None:
+    """Create the settings table if it doesn't exist."""
+    try:
+        with get_pool().connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ DEFAULT now(),
+                    updated_by TEXT
+                )
+            """)
+            conn.commit()
+    except Exception as e:
+        raise StorageError(f"Failed to create settings table: {e}") from e
+
+
+def list_settings() -> list[dict]:
+    try:
+        with get_pool().connection() as conn:
+            rows = conn.execute(
+                "SELECT key, value, updated_at, updated_by FROM settings ORDER BY key"
+            ).fetchall()
+        return [
+            {"key": r[0], "value": r[1], "updated_at": r[2].isoformat() if r[2] else None, "updated_by": r[3]}
+            for r in rows
+        ]
+    except Exception as e:
+        raise StorageError(f"Failed to list settings: {e}") from e
+
+
+def get_setting(key: str) -> dict | None:
+    try:
+        with get_pool().connection() as conn:
+            row = conn.execute(
+                "SELECT key, value, updated_at, updated_by FROM settings WHERE key = %s", (key,)
+            ).fetchone()
+        if not row:
+            return None
+        return {"key": row[0], "value": row[1], "updated_at": row[2].isoformat() if row[2] else None, "updated_by": row[3]}
+    except Exception as e:
+        raise StorageError(f"Failed to get setting: {e}") from e
+
+
+def upsert_setting(key: str, value: str, updated_by: str | None = None) -> dict:
+    try:
+        with get_pool().connection() as conn:
+            row = conn.execute(
+                """INSERT INTO settings (key, value, updated_by, updated_at)
+                VALUES (%s, %s, %s, now())
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()
+                RETURNING key, value, updated_at, updated_by""",
+                (key, value, updated_by),
+            ).fetchone()
+            conn.commit()
+        return {"key": row[0], "value": row[1], "updated_at": row[2].isoformat() if row[2] else None, "updated_by": row[3]}
+    except Exception as e:
+        raise StorageError(f"Failed to upsert setting: {e}") from e
+
+
+def delete_setting(key: str) -> bool:
+    try:
+        with get_pool().connection() as conn:
+            cur = conn.execute("DELETE FROM settings WHERE key = %s", (key,))
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as e:
+        raise StorageError(f"Failed to delete setting: {e}") from e
+
+
 def refresh_all_document_permissions() -> int:
     """Recompute document_permissions for all documents based on current path_permissions."""
     docs = list_documents()

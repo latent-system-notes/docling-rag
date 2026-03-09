@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .routes import auth, users, groups, permissions, search
+from .routes import auth, users, groups, permissions, search, settings, ingestion
 
 # React build output directory (frontend/dist after `npm run build`)
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -28,6 +28,8 @@ def create_app() -> FastAPI:
     app.include_router(groups.router)
     app.include_router(permissions.router)
     app.include_router(search.router)
+    app.include_router(settings.router)
+    app.include_router(ingestion.router)
 
     # Serve React static build if available
     if FRONTEND_DIR.is_dir():
@@ -37,8 +39,11 @@ def create_app() -> FastAPI:
             app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
         # Serve other static files (favicon, etc.) and SPA fallback
+        # Paths starting with /api or /mcp are handled by their own routers/mounts
         @app.get("/{full_path:path}")
         async def serve_spa(request: Request, full_path: str):
+            if full_path.startswith(("api/", "api", "mcp/", "mcp")):
+                return HTMLResponse("Not found", status_code=404)
             # Try to serve the exact file first (e.g. favicon.ico, robots.txt)
             file_path = FRONTEND_DIR / full_path
             if full_path and file_path.is_file() and ".." not in full_path:

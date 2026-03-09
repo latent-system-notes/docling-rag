@@ -7,6 +7,8 @@ import DocumentsPage from './pages/DocumentsPage'
 import UsersPage from './pages/UsersPage'
 import GroupsPage from './pages/GroupsPage'
 import PermissionsPage from './pages/PermissionsPage'
+import SettingsPage from './pages/SettingsPage'
+import IngestionPage from './pages/IngestionPage'
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem('token')
@@ -39,6 +41,8 @@ export default function App() {
         <Route path="users" element={<AdminRoute><UsersPage /></AdminRoute>} />
         <Route path="groups" element={<AdminRoute><GroupsPage /></AdminRoute>} />
         <Route path="permissions" element={<AdminRoute><PermissionsPage /></AdminRoute>} />
+        <Route path="settings" element={<AdminRoute><SettingsPage /></AdminRoute>} />
+        <Route path="ingestion" element={<AdminRoute><IngestionPage /></AdminRoute>} />
       </Route>
     </Routes>
   )

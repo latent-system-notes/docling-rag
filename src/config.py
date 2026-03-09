@@ -96,6 +96,36 @@ _ENV_DEFAULTS = {
     "DASHBOARD_PORT": "8080",
 }
 
+SETTINGS_REGISTRY = {
+    # Docling Service
+    "DOCLING_SERVE_URL": {"label": "Docling Serve URL", "group": "Docling Service", "restart_required": False, "multiline": False},
+    "DOCLING_SERVE_TIMEOUT": {"label": "Docling Serve Timeout (s)", "group": "Docling Service", "restart_required": False, "multiline": False},
+    # Ingestion
+    "INCLUDE_FOLDERS": {"label": "Include Folders (pipe-separated)", "group": "Ingestion", "restart_required": False, "multiline": False},
+    "DOCUMENTS_DIR": {"label": "Documents Directory", "group": "Ingestion", "restart_required": False, "multiline": False},
+    # MCP Configuration
+    "MCP_INSTRUCTIONS": {"label": "MCP Instructions", "group": "MCP Configuration", "restart_required": False, "reload_mcp": True, "multiline": True},
+    "MCP_TOOL_QUERY_DESC": {"label": "search_documents Description", "group": "MCP Configuration", "restart_required": False, "reload_mcp": True, "multiline": True},
+    "MCP_TOOL_LIST_DOCS_DESC": {"label": "list_all_documents Description", "group": "MCP Configuration", "restart_required": False, "reload_mcp": True, "multiline": True},
+    "MCP_SERVER_NAME": {"label": "MCP Server Name", "group": "MCP Configuration", "restart_required": False, "reload_mcp": True, "multiline": False},
+}
+
+
+def load_settings_from_db():
+    """Load settings overrides from DB into os.environ so config() picks them up."""
+    try:
+        from .storage.postgres import list_settings
+        for row in list_settings():
+            key = row["key"]
+            if key in SETTINGS_REGISTRY:
+                os.environ[key] = row["value"]
+        logger = get_logger(__name__)
+        logger.info("Loaded settings overrides from database")
+    except Exception as e:
+        logger = get_logger(__name__)
+        logger.warning(f"Could not load settings from DB (table may not exist yet): {e}")
+
+
 def config(key: str):
     """Get env-configurable value. Call at runtime, not import time."""
     value = os.environ.get(key) or _ENV_DEFAULTS.get(key)

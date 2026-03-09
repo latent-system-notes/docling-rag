@@ -246,12 +246,17 @@ def reset(env: str):
 
 
 @app.command()
-def mcp(env: str):
+def serve(env: str):
     _load_env(env)
     from src.config import config, MCP_HOST
+    from src.storage.postgres import create_collection
+    create_collection()
     from src.mcp.server import run_server
     port = config("MCP_PORT")
-    console.print(f"[green]Starting MCP ({config('MCP_SERVER_NAME')}) on http://{MCP_HOST}:{port}")
+    console.print(f"[green]Starting server ({config('MCP_SERVER_NAME')}) on http://{MCP_HOST}:{port}")
+    console.print(f"  MCP:       http://{MCP_HOST}:{port}/mcp")
+    console.print(f"  API:       http://{MCP_HOST}:{port}/api")
+    console.print(f"  Dashboard: http://{MCP_HOST}:{port}/")
     try: run_server()
     except KeyboardInterrupt: console.print("\n[yellow]Stopped[/yellow]")
 
@@ -472,15 +477,8 @@ def refresh_permissions_cmd(env: str):
 
 @app.command()
 def dashboard(env: str):
-    _load_env(env)
-    from src.config import config
-    from src.storage.postgres import create_collection
-    create_collection()
-    import uvicorn
-    from src.dashboard.app import create_app
-    port = int(config("DASHBOARD_PORT") or 8080)
-    console.print(f"[green]Starting dashboard on http://0.0.0.0:{port}")
-    uvicorn.run(create_app(), host="0.0.0.0", port=port)
+    """Alias for 'serve' — starts the combined server."""
+    serve(env)
 
 
 if __name__ == "__main__":
