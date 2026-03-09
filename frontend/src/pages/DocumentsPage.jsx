@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import { FileText, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 export default function DocumentsPage() {
   const [docs, setDocs] = useState([])
@@ -33,84 +37,74 @@ export default function DocumentsPage() {
   }
 
   return (
-    <div>
-      <h2 style={{ marginBottom: '1.5rem' }}>My Documents</h2>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold tracking-tight">My Documents</h1>
 
-      <div className="card">
-        <div className="text-sm text-muted mb-4">
-          Documents you have access to based on your group permissions.
-        </div>
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground mb-4">
+            Documents you have access to based on your group permissions.
+          </p>
 
-        {loading && <div className="text-muted">Loading...</div>}
+          {loading && <p className="text-muted-foreground">Loading...</p>}
 
-        {!loading && docs.length === 0 && (
-          <div className="text-muted" style={{ textAlign: 'center', padding: '2rem' }}>
-            No documents available. You may not have any group permissions assigned yet.
-          </div>
-        )}
+          {!loading && docs.length === 0 && (
+            <p className="text-center text-muted-foreground py-8">
+              No documents available. You may not have any group permissions assigned yet.
+            </p>
+          )}
 
-        {!loading && docs.length > 0 && (
-          <>
-            <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>File</th>
-                  <th>Folder</th>
-                  <th>Type</th>
-                  <th>Language</th>
-                  <th style={{ textAlign: 'right' }}>Chunks</th>
-                  <th>Ingested</th>
-                </tr>
-              </thead>
-              <tbody>
-                {docs.map((d) => (
-                  <tr key={d.doc_id}>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <FileText size={14} style={{ color: 'var(--warning)', flexShrink: 0 }} />
-                        <span style={{ fontWeight: 500 }}>{fileName(d.file_path)}</span>
-                      </div>
-                    </td>
-                    <td className="text-sm text-muted" style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {folderPath(d.file_path)}
-                    </td>
-                    <td><span className="badge badge-green">{d.doc_type}</span></td>
-                    <td><span className="badge badge-blue">{d.language}</span></td>
-                    <td style={{ textAlign: 'right' }}>{d.num_chunks}</td>
-                    <td className="text-sm text-muted">
-                      {d.ingested_at ? new Date(d.ingested_at).toLocaleString() : ''}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
+          {!loading && docs.length > 0 && (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>File</TableHead>
+                    <TableHead>Folder</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Language</TableHead>
+                    <TableHead className="text-right">Chunks</TableHead>
+                    <TableHead>Ingested</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {docs.map((d) => (
+                    <TableRow key={d.doc_id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-amber-500 shrink-0" />
+                          <span className="font-medium">{fileName(d.file_path)}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-[300px] truncate">
+                        {folderPath(d.file_path)}
+                      </TableCell>
+                      <TableCell><Badge variant="success">{d.doc_type}</Badge></TableCell>
+                      <TableCell><Badge variant="info">{d.language}</Badge></TableCell>
+                      <TableCell className="text-right">{d.num_chunks}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {d.ingested_at ? new Date(d.ingested_at).toLocaleString() : ''}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
 
-            <div className="flex justify-between items-center mt-2" style={{ padding: '0.5rem 0' }}>
-              <button
-                className="btn-primary btn-sm"
-                disabled={offset === 0}
-                onClick={() => load(Math.max(0, offset - limit))}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-              >
-                <ChevronLeft size={14} /> Previous
-              </button>
-              <span className="text-sm text-muted">
-                Showing {offset + 1}–{offset + docs.length}
-              </span>
-              <button
-                className="btn-primary btn-sm"
-                disabled={docs.length < limit}
-                onClick={() => load(offset + limit)}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-              >
-                Next <ChevronRight size={14} />
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+              <div className="flex items-center justify-between pt-4">
+                <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => load(Math.max(0, offset - limit))}>
+                  <ChevronLeft className="h-4 w-4" /> Previous
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Showing {offset + 1}&ndash;{offset + docs.length}
+                </span>
+                <Button variant="outline" size="sm" disabled={docs.length < limit} onClick={() => load(offset + limit)}>
+                  Next <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

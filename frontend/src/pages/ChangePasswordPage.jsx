@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export default function ChangePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -36,31 +41,37 @@ export default function ChangePasswordPage() {
   }
 
   return (
-    <div className="login-container">
-      <div className="card login-card">
-        <h3 style={{ textAlign: 'center', marginBottom: '0.5rem' }}>Change Password</h3>
-        <p style={{ textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-          You must change your password before continuing.
-        </p>
-        {error && <div style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: '0.75rem' }}>{error}</div>}
-        <form onSubmit={handleSubmit}>
-          <div className="form-group mb-4">
-            <label>Current Password</label>
-            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoFocus required />
-          </div>
-          <div className="form-group mb-4">
-            <label>New Password</label>
-            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required />
-          </div>
-          <div className="form-group mb-4">
-            <label>Confirm New Password</label>
-            <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required />
-          </div>
-          <button className="btn-primary" style={{ width: '100%' }} disabled={loading}>
-            {loading ? 'Changing...' : 'Change Password'}
-          </button>
-        </form>
-      </div>
+    <div className="flex items-center justify-center min-h-screen bg-muted/40">
+      <Card className="w-[380px]">
+        <CardHeader className="text-center">
+          <CardTitle className="text-xl">Change Password</CardTitle>
+          <CardDescription>You must change your password before continuing.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="current">Current Password</Label>
+              <Input id="current" type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoFocus required />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new">New Password</Label>
+              <Input id="new" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm">Confirm New Password</Label>
+              <Input id="confirm" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required />
+            </div>
+            <Button className="w-full" disabled={loading}>
+              {loading ? 'Changing...' : 'Change Password'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   )
 }

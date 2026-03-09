@@ -99,10 +99,9 @@ _ENV_DEFAULTS = {
 SETTINGS_REGISTRY = {
     # Docling Service
     "DOCLING_SERVE_URL": {"label": "Docling Serve URL", "group": "Docling Service", "restart_required": False, "multiline": False},
-    "DOCLING_SERVE_TIMEOUT": {"label": "Docling Serve Timeout (s)", "group": "Docling Service", "restart_required": False, "multiline": False},
     # Ingestion
-    "INCLUDE_FOLDERS": {"label": "Include Folders (pipe-separated)", "group": "Ingestion", "restart_required": False, "multiline": False},
-    "DOCUMENTS_DIR": {"label": "Documents Directory", "group": "Ingestion", "restart_required": False, "multiline": False},
+    "INCLUDE_FOLDERS": {"label": "Include Folders (pipe-separated)", "group": "Ingestion", "restart_required": False, "multiline": False, "browse_folders": True},
+    "DOCUMENTS_DIR": {"label": "Documents Directory", "group": "Ingestion", "restart_required": False, "multiline": False, "browse": True},
     # MCP Configuration
     "MCP_INSTRUCTIONS": {"label": "MCP Instructions", "group": "MCP Configuration", "restart_required": False, "reload_mcp": True, "multiline": True},
     "MCP_TOOL_QUERY_DESC": {"label": "search_documents Description", "group": "MCP Configuration", "restart_required": False, "reload_mcp": True, "multiline": True},
@@ -129,7 +128,7 @@ def load_settings_from_db():
 def config(key: str):
     """Get env-configurable value. Call at runtime, not import time."""
     value = os.environ.get(key) or _ENV_DEFAULTS.get(key)
-    if key in ("MCP_PORT", "DOCLING_SERVE_TIMEOUT", "POSTGRES_PORT", "POSTGRES_POOL_MIN", "POSTGRES_POOL_MAX"):
+    if key in ("MCP_PORT", "POSTGRES_PORT", "POSTGRES_POOL_MIN", "POSTGRES_POOL_MAX"):
         return int(value) if value else None
     if key in ("DATA_DIR", "MODELS_DIR", "DOCUMENTS_DIR"):
         return Path(value)

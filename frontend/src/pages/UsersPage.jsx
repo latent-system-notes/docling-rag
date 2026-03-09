@@ -1,18 +1,27 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
-import { Pencil, Trash2, KeyRound, Plus, UserPlus, X } from 'lucide-react'
-import { Dialog, ConfirmDialog, AlertDialog } from '../components/Dialog'
+import { Pencil, Trash2, KeyRound, Plus, UserPlus, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 
 function sanitizeUsername(str) {
   return str.toLowerCase().replace(/[^a-z0-9_-]/g, '')
 }
 
-const PAGE_SIZE = 15
+const PAGE_SIZES = [10, 15, 20, 50]
 
 export default function UsersPage() {
   const [users, setUsers] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(15)
   const [search, setSearch] = useState('')
   const [allGroups, setAllGroups] = useState([])
   const [showCreate, setShowCreate] = useState(false)
@@ -26,10 +35,10 @@ export default function UsersPage() {
   const [alert, setAlert] = useState({ open: false, title: '', message: '' })
 
   const loadUsers = useCallback(async () => {
-    const res = await api.listUsers(search, page, PAGE_SIZE)
+    const res = await api.listUsers(search, page, pageSize)
     setUsers(res.items)
     setTotal(res.total)
-  }, [search, page])
+  }, [search, page, pageSize])
 
   const loadGroups = async () => {
     const res = await api.listAllGroups()
@@ -40,7 +49,7 @@ export default function UsersPage() {
   useEffect(() => { loadGroups() }, [])
 
   const handleSearch = (v) => { setSearch(v); setPage(1) }
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -113,219 +122,338 @@ export default function UsersPage() {
   const availableGroups = allGroups.filter(g => !userGroups.some(ug => ug.id === g.id))
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h2>Users</h2>
-        <button className="btn-primary" onClick={() => setShowCreate(!showCreate)}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          {showCreate ? <><X size={14} /> Cancel</> : <><UserPlus size={14} /> New User</>}
-        </button>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
+        <Button onClick={() => setShowCreate(!showCreate)}>
+          {showCreate ? <><X className="h-4 w-4" /> Cancel</> : <><UserPlus className="h-4 w-4" /> New User</>}
+        </Button>
       </div>
 
+      {/* Create User Form */}
       {showCreate && (
-        <div className="card">
-          <h3>Create User</h3>
-          <form onSubmit={handleCreate}>
-            <div className="form-row">
-              <div className="form-group">
-                <label>Username <span className="text-muted text-sm">(a-z, 0-9, dash, underscore)</span></label>
-                <input
-                  value={form.username}
-                  onChange={e => setForm({ ...form, username: sanitizeUsername(e.target.value) })}
-                  placeholder="e.g. john-doe"
-                  required
-                />
+        <Card>
+          <CardHeader>
+            <CardTitle>Create User</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Username <span className="text-muted-foreground text-xs">(a-z, 0-9, dash, underscore)</span></Label>
+                  <Input value={form.username} onChange={e => setForm({ ...form, username: sanitizeUsername(e.target.value) })} placeholder="e.g. john-doe" required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <Input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Auth Type</Label>
+                  <Select value={form.auth_type} onValueChange={v => setForm({ ...form, auth_type: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="local">Local</SelectItem>
+                      <SelectItem value="ldap">LDAP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="form-group">
-                <label>Password</label>
-                <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Display Name</Label>
+                  <Input value={form.display_name} onChange={e => setForm({ ...form, display_name: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Admin</Label>
+                  <Select value={String(form.is_admin)} onValueChange={v => setForm({ ...form, is_admin: v === 'true' })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="false">No</SelectItem>
+                      <SelectItem value="true">Yes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="form-group">
-                <label>Auth Type</label>
-                <select value={form.auth_type} onChange={e => setForm({ ...form, auth_type: e.target.value })}>
-                  <option value="local">Local</option>
-                  <option value="ldap">LDAP</option>
-                </select>
-              </div>
-            </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label>Display Name</label>
-                <input value={form.display_name} onChange={e => setForm({ ...form, display_name: e.target.value })} />
-              </div>
-              <div className="form-group">
-                <label>Email</label>
-                <input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-              </div>
-              <div className="form-group">
-                <label>Admin</label>
-                <select value={form.is_admin} onChange={e => setForm({ ...form, is_admin: e.target.value === 'true' })}>
-                  <option value="false">No</option>
-                  <option value="true">Yes</option>
-                </select>
-              </div>
-            </div>
-            <button className="btn-primary" type="submit" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Plus size={14} /> Create
-            </button>
-          </form>
-        </div>
+              <Button type="submit"><Plus className="h-4 w-4" /> Create</Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
 
-      <div className="card" style={{ padding: '0.75rem 1rem', marginBottom: '1rem' }}>
-        <input
-          value={search}
-          onChange={e => handleSearch(e.target.value)}
-          placeholder="Search by username, name, or email..."
-          style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'inherit', fontSize: '0.9rem' }}
-        />
-      </div>
+      {/* Search */}
+      <Card>
+        <CardContent className="py-3">
+          <Input
+            value={search}
+            onChange={e => handleSearch(e.target.value)}
+            placeholder="Search by username, name, or email..."
+            className="border-0 shadow-none focus-visible:ring-0"
+          />
+        </CardContent>
+      </Card>
 
-      <div className="flex gap-4">
-        <div className="card" style={{ flex: 2, minWidth: 0 }}>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Username</th><th>Name</th><th>Email</th><th>Auth</th><th>Admin</th><th>Active</th><th>Actions</th></tr>
-              </thead>
-              <tbody>
+      {/* Users table + Groups panel */}
+      <div className="flex flex-col lg:flex-row gap-6">
+        <Card className="flex-[2] min-w-0">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Username</TableHead>
+                  <TableHead className="hidden sm:table-cell">Name</TableHead>
+                  <TableHead className="hidden lg:table-cell">Email</TableHead>
+                  <TableHead className="hidden md:table-cell">Auth</TableHead>
+                  <TableHead className="hidden md:table-cell">Admin</TableHead>
+                  <TableHead className="hidden md:table-cell">Active</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {users.map(u => (
-                  <tr key={u.id} onClick={() => selectUser(u)} style={{ cursor: 'pointer', background: selectedUser?.id === u.id ? 'var(--bg-input)' : '' }}>
-                    <td>{u.username}</td>
-                    <td>{u.display_name}</td>
-                    <td className="text-muted text-sm">{u.email}</td>
-                    <td><span className="badge badge-blue">{u.auth_type}</span></td>
-                    <td>{u.is_admin ? <span className="badge badge-green">Yes</span> : 'No'}</td>
-                    <td>{u.is_active ? <span className="badge badge-green">Yes</span> : <span className="badge badge-red">No</span>}</td>
-                    <td>
-                      <div className="flex gap-2">
-                        <button className="btn-icon-primary" title="Edit" onClick={(e) => { e.stopPropagation(); handleEdit(u) }}><Pencil size={15} /></button>
-                        <button className="btn-icon-warning" title="Reset Password" onClick={(e) => { e.stopPropagation(); setResetPw({ show: true, userId: u.id, username: u.username, password: '' }) }}><KeyRound size={15} /></button>
-                        <button className="btn-icon-danger" title="Delete" onClick={(e) => { e.stopPropagation(); setConfirmDelete(u) }}><Trash2 size={15} /></button>
+                  <TableRow
+                    key={u.id}
+                    className="cursor-pointer"
+                    onClick={() => selectUser(u)}
+                    data-state={selectedUser?.id === u.id ? 'selected' : undefined}
+                  >
+                    <TableCell className="font-medium">{u.username}</TableCell>
+                    <TableCell className="hidden sm:table-cell">{u.display_name}</TableCell>
+                    <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">{u.email}</TableCell>
+                    <TableCell className="hidden md:table-cell"><Badge variant="info">{u.auth_type}</Badge></TableCell>
+                    <TableCell className="hidden md:table-cell">{u.is_admin ? <Badge variant="success">Yes</Badge> : <span className="text-muted-foreground">No</span>}</TableCell>
+                    <TableCell className="hidden md:table-cell">{u.is_active ? <Badge variant="success">Yes</Badge> : <Badge variant="destructive">No</Badge>}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex gap-1 justify-end">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleEdit(u) }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Edit</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-600" onClick={(e) => { e.stopPropagation(); setResetPw({ show: true, userId: u.id, username: u.username, password: '' }) }}>
+                              <KeyRound className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Reset Password</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={(e) => { e.stopPropagation(); setConfirmDelete(u) }}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Delete</TooltipContent>
+                        </Tooltip>
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-                {users.length === 0 && <tr><td colSpan={7} className="text-muted" style={{ textAlign: 'center' }}>No users found</td></tr>}
-              </tbody>
-            </table>
-          </div>
+                {users.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">No users found</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
 
-          {totalPages > 1 && (
-            <div className="flex justify-between items-center" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-              <span className="text-muted">{total} user{total !== 1 ? 's' : ''}</span>
-              <div className="flex gap-2 items-center">
-                <button className="btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button>
-                <span>{page} / {totalPages}</span>
-                <button className="btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next</button>
+            {/* Pagination footer */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t">
+              <div className="text-sm text-muted-foreground">
+                {total} user{total !== 1 ? 's' : ''}
+              </div>
+              <div className="flex items-center gap-3 sm:gap-6 flex-wrap justify-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</span>
+                  <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1) }}>
+                    <SelectTrigger className="h-8 w-[70px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZES.map(s => (
+                        <SelectItem key={s} value={String(s)}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  Page {page} of {totalPages}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)}>
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
+                    <ChevronsRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </div>
-          )}
-        </div>
+          </CardContent>
+        </Card>
 
+        {/* Groups side panel */}
         {selectedUser && (
-          <div className="card" style={{ flex: 1 }}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 style={{ margin: 0 }}>{selectedUser.username} — Groups</h3>
-              <button className="btn-icon" onClick={() => setSelectedUser(null)}><X size={16} /></button>
-            </div>
-            <div className="mb-4">
-              {userGroups.length === 0 && <div className="text-muted text-sm">No groups assigned</div>}
-              {userGroups.map(g => (
-                <div key={g.id} className="flex justify-between items-center" style={{ padding: '0.3rem 0' }}>
-                  <span className="badge badge-blue">{g.name}</span>
-                  <button className="btn-icon-danger" title="Remove group" onClick={() => removeGroup(g.id)}><X size={14} /></button>
-                </div>
-              ))}
-            </div>
-            {availableGroups.length > 0 && (
-              <div>
-                <div className="text-sm text-muted mb-2">Add group:</div>
-                <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-                  {availableGroups.map(g => (
-                    <button key={g.id} className="btn-primary btn-sm" onClick={() => assignGroup(g.id)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                      <Plus size={12} /> {g.name}
-                    </button>
-                  ))}
-                </div>
+          <Card className="flex-1">
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-base">{selectedUser.username} &mdash; Groups</CardTitle>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedUser(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 mb-4">
+                {userGroups.length === 0 && <p className="text-sm text-muted-foreground">No groups assigned</p>}
+                {userGroups.map(g => (
+                  <div key={g.id} className="flex items-center justify-between">
+                    <Badge variant="info">{g.name}</Badge>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeGroup(g.id)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
+              {availableGroups.length > 0 && (
+                <div>
+                  <p className="text-sm text-muted-foreground mb-2">Add group:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {availableGroups.map(g => (
+                      <Button key={g.id} variant="outline" size="sm" onClick={() => assignGroup(g.id)}>
+                        <Plus className="h-3 w-3" /> {g.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
       </div>
 
       {/* Edit User Dialog */}
-      <Dialog open={!!editUser} onClose={() => setEditUser(null)} title={`Edit User: ${editUser?.username || ''}`} width={480}>
-        <form onSubmit={handleUpdate}>
-          <div className="form-group mb-4">
-            <label>Display Name</label>
-            <input value={editForm.display_name} onChange={e => setEditForm({ ...editForm, display_name: e.target.value })} autoFocus />
-          </div>
-          <div className="form-group mb-4">
-            <label>Email</label>
-            <input value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Auth Type</label>
-              <select value={editForm.auth_type} onChange={e => setEditForm({ ...editForm, auth_type: e.target.value })}>
-                <option value="local">Local</option>
-                <option value="ldap">LDAP</option>
-              </select>
+      <Dialog open={!!editUser} onOpenChange={() => setEditUser(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit User: {editUser?.username}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleUpdate} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Display Name</Label>
+              <Input value={editForm.display_name} onChange={e => setEditForm({ ...editForm, display_name: e.target.value })} autoFocus />
             </div>
-            <div className="form-group">
-              <label>Admin</label>
-              <select value={editForm.is_admin} onChange={e => setEditForm({ ...editForm, is_admin: e.target.value === 'true' })}>
-                <option value="false">No</option>
-                <option value="true">Yes</option>
-              </select>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
             </div>
-            <div className="form-group">
-              <label>Active</label>
-              <select value={editForm.is_active} onChange={e => setEditForm({ ...editForm, is_active: e.target.value === 'true' })}>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Auth Type</Label>
+                <Select value={editForm.auth_type} onValueChange={v => setEditForm({ ...editForm, auth_type: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="local">Local</SelectItem>
+                    <SelectItem value="ldap">LDAP</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Admin</Label>
+                <Select value={String(editForm.is_admin)} onValueChange={v => setEditForm({ ...editForm, is_admin: v === 'true' })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="false">No</SelectItem>
+                    <SelectItem value="true">Yes</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Active</Label>
+                <Select value={String(editForm.is_active)} onValueChange={v => setEditForm({ ...editForm, is_active: v === 'true' })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Yes</SelectItem>
+                    <SelectItem value="false">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          </div>
-          <div className="flex gap-2" style={{ marginTop: '1rem', justifyContent: 'flex-end' }}>
-            <button type="button" style={{ padding: '0.5rem 1rem', cursor: 'pointer', background: 'var(--bg-input)', color: 'var(--text)' }} onClick={() => setEditUser(null)}>Cancel</button>
-            <button className="btn-primary" type="submit">Save</button>
-          </div>
-        </form>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditUser(null)}>Cancel</Button>
+              <Button type="submit">Save</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
       </Dialog>
 
       {/* Reset Password Dialog */}
-      <Dialog open={resetPw.show} onClose={() => setResetPw({ show: false, userId: null, username: '', password: '' })} title={`Reset Password: ${resetPw.username}`} width={400}>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-          User will be forced to change password on next login.
-        </p>
-        <form onSubmit={handleResetPassword}>
-          <div className="form-group mb-4">
-            <label>New Password</label>
-            <input type="password" value={resetPw.password} onChange={e => setResetPw({ ...resetPw, password: e.target.value })} autoFocus required />
-          </div>
-          <div className="flex gap-2" style={{ justifyContent: 'flex-end' }}>
-            <button type="button" style={{ padding: '0.5rem 1rem', cursor: 'pointer', background: 'var(--bg-input)', color: 'var(--text)' }} onClick={() => setResetPw({ show: false, userId: null, username: '', password: '' })}>Cancel</button>
-            <button className="btn-primary" type="submit">Reset Password</button>
-          </div>
-        </form>
+      <Dialog open={resetPw.show} onOpenChange={() => setResetPw({ show: false, userId: null, username: '', password: '' })}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset Password: {resetPw.username}</DialogTitle>
+            <DialogDescription>User will be forced to change password on next login.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleResetPassword} className="space-y-4">
+            <div className="space-y-2">
+              <Label>New Password</Label>
+              <Input type="password" value={resetPw.password} onChange={e => setResetPw({ ...resetPw, password: e.target.value })} autoFocus required />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setResetPw({ show: false, userId: null, username: '', password: '' })}>Cancel</Button>
+              <Button type="submit">Reset Password</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
       </Dialog>
 
       {/* Confirm Delete Dialog */}
-      <ConfirmDialog
-        open={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
-        onConfirm={() => handleDelete(confirmDelete?.id)}
-        title="Delete User"
-        message={`Are you sure you want to delete user "${confirmDelete?.username}"?`}
-        confirmLabel="Delete"
-        danger
-      />
+      <Dialog open={!!confirmDelete} onOpenChange={() => setConfirmDelete(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete User</DialogTitle>
+            <DialogDescription>Are you sure you want to delete user "{confirmDelete?.username}"?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { handleDelete(confirmDelete?.id); setConfirmDelete(null) }}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Alert Dialog */}
-      <AlertDialog open={alert.open} onClose={() => setAlert({ ...alert, open: false })} title={alert.title} message={alert.message} />
+      <Dialog open={alert.open} onOpenChange={() => setAlert({ ...alert, open: false })}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{alert.title}</DialogTitle>
+            <DialogDescription>{alert.message}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setAlert({ ...alert, open: false })}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

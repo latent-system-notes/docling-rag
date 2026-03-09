@@ -1,23 +1,30 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
-import { Pencil, Trash2, Plus, X } from 'lucide-react'
-import { Dialog, ConfirmDialog } from '../components/Dialog'
+import { Pencil, Trash2, Plus, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select'
 
-// During typing: allow trailing dash so user can type "finance-team"
 function toKebabInput(str) {
   return str.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-/, '')
 }
-// On submit: strip trailing dash
 function toKebabFinal(str) {
   return toKebabInput(str).replace(/-$/, '')
 }
 
-const PAGE_SIZE = 15
+const PAGE_SIZES = [10, 15, 20, 50]
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(15)
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ name: '', description: '' })
@@ -26,15 +33,15 @@ export default function GroupsPage() {
   const [confirmDelete, setConfirmDelete] = useState(null)
 
   const loadGroups = useCallback(async () => {
-    const res = await api.listGroups(search, page, PAGE_SIZE)
+    const res = await api.listGroups(search, page, pageSize)
     setGroups(res.items)
     setTotal(res.total)
-  }, [search, page])
+  }, [search, page, pageSize])
 
   useEffect(() => { loadGroups() }, [loadGroups])
 
   const handleSearch = (v) => { setSearch(v); setPage(1) }
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -67,121 +74,176 @@ export default function GroupsPage() {
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h2>Groups</h2>
-        <button className="btn-primary" onClick={() => { setShowCreate(!showCreate); setEditGroup(null) }}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          {showCreate ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New Group</>}
-        </button>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Groups</h1>
+        <Button onClick={() => { setShowCreate(!showCreate); setEditGroup(null) }}>
+          {showCreate ? <><X className="h-4 w-4" /> Cancel</> : <><Plus className="h-4 w-4" /> New Group</>}
+        </Button>
       </div>
 
       {showCreate && (
-        <div className="card">
-          <h3>Create Group</h3>
-          <form onSubmit={handleCreate}>
-            <div className="form-row">
-              <div className="form-group">
-                <label>Name <span className="text-muted text-sm">(kebab-case)</span></label>
-                <input
-                  value={form.name}
-                  onChange={e => setForm({ ...form, name: toKebabInput(e.target.value) })}
-                  placeholder="e.g. finance-team"
-                  required
-                />
+        <Card>
+          <CardHeader>
+            <CardTitle>Create Group</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreate} className="flex flex-col sm:flex-row sm:items-end gap-4">
+              <div className="space-y-2 flex-1">
+                <Label>Name <span className="text-muted-foreground text-xs">(kebab-case)</span></Label>
+                <Input value={form.name} onChange={e => setForm({ ...form, name: toKebabInput(e.target.value) })} placeholder="e.g. finance-team" required />
               </div>
-              <div className="form-group">
-                <label>Description</label>
-                <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Optional description" />
+              <div className="space-y-2 flex-1">
+                <Label>Description</Label>
+                <Input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Optional description" />
               </div>
-              <button className="btn-primary" type="submit" style={{ alignSelf: 'end', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <Plus size={14} /> Create
-              </button>
-            </div>
-          </form>
-        </div>
+              <Button type="submit"><Plus className="h-4 w-4" /> Create</Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
 
-      <div className="card" style={{ padding: '0.75rem 1rem', marginBottom: '1rem' }}>
-        <input
-          value={search}
-          onChange={e => handleSearch(e.target.value)}
-          placeholder="Search by name or description..."
-          style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'inherit', fontSize: '0.9rem' }}
-        />
-      </div>
+      {/* Search */}
+      <Card>
+        <CardContent className="py-3">
+          <Input
+            value={search}
+            onChange={e => handleSearch(e.target.value)}
+            placeholder="Search by name or description..."
+            className="border-0 shadow-none focus-visible:ring-0"
+          />
+        </CardContent>
+      </Card>
 
-      <div className="card">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr><th>ID</th><th>Name</th><th>Description</th><th>Created</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
+      {/* Groups table */}
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="hidden sm:table-cell">ID</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead className="hidden md:table-cell">Description</TableHead>
+                <TableHead className="hidden sm:table-cell">Created</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {groups.map(g => (
-                <tr key={g.id}>
-                  <td className="text-muted">{g.id}</td>
-                  <td><span className="badge badge-blue">{g.name}</span></td>
-                  <td>{g.description}</td>
-                  <td className="text-muted text-sm">{new Date(g.created_at).toLocaleDateString()}</td>
-                  <td>
-                    <div className="flex gap-2">
-                      <button className="btn-icon-primary" title="Edit" onClick={() => { handleEdit(g); setShowCreate(false) }}><Pencil size={15} /></button>
-                      <button className="btn-icon-danger" title="Delete" onClick={() => setConfirmDelete(g)}><Trash2 size={15} /></button>
+                <TableRow key={g.id}>
+                  <TableCell className="hidden sm:table-cell text-muted-foreground">{g.id}</TableCell>
+                  <TableCell><Badge variant="info">{g.name}</Badge></TableCell>
+                  <TableCell className="hidden md:table-cell">{g.description}</TableCell>
+                  <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">{new Date(g.created_at).toLocaleDateString()}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex gap-1 justify-end">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { handleEdit(g); setShowCreate(false) }}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Edit</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setConfirmDelete(g)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Delete</TooltipContent>
+                      </Tooltip>
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-              {groups.length === 0 && <tr><td colSpan={5} className="text-muted" style={{ textAlign: 'center' }}>No groups found</td></tr>}
-            </tbody>
-          </table>
-        </div>
+              {groups.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">No groups found</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
 
-        {totalPages > 1 && (
-          <div className="flex justify-between items-center" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-            <span className="text-muted">{total} group{total !== 1 ? 's' : ''}</span>
-            <div className="flex gap-2 items-center">
-              <button className="btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button>
-              <span>{page} / {totalPages}</span>
-              <button className="btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next</button>
+          {/* Pagination footer */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t">
+            <div className="text-sm text-muted-foreground">
+              {total} group{total !== 1 ? 's' : ''}
+            </div>
+            <div className="flex items-center gap-3 sm:gap-6 flex-wrap justify-center">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</span>
+                <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1) }}>
+                  <SelectTrigger className="h-8 w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZES.map(s => (
+                      <SelectItem key={s} value={String(s)}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <span className="text-sm text-muted-foreground whitespace-nowrap">
+                Page {page} of {totalPages}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)}>
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Edit Group Dialog */}
-      <Dialog open={!!editGroup} onClose={() => setEditGroup(null)} title={`Edit Group: ${editGroup?.name || ''}`} width={460}>
-        <form onSubmit={handleUpdate}>
-          <div className="form-group mb-4">
-            <label>Name <span className="text-muted text-sm">(kebab-case)</span></label>
-            <input
-              value={editForm.name}
-              onChange={e => setEditForm({ ...editForm, name: toKebabInput(e.target.value) })}
-              required
-              autoFocus
-            />
-          </div>
-          <div className="form-group mb-4">
-            <label>Description</label>
-            <input value={editForm.description} onChange={e => setEditForm({ ...editForm, description: e.target.value })} />
-          </div>
-          <div className="flex gap-2" style={{ justifyContent: 'flex-end' }}>
-            <button type="button" style={{ padding: '0.5rem 1rem', cursor: 'pointer', background: 'var(--bg-input)', color: 'var(--text)' }} onClick={() => setEditGroup(null)}>Cancel</button>
-            <button className="btn-primary" type="submit">Save</button>
-          </div>
-        </form>
+      <Dialog open={!!editGroup} onOpenChange={() => setEditGroup(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Group: {editGroup?.name}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleUpdate} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name <span className="text-muted-foreground text-xs">(kebab-case)</span></Label>
+              <Input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: toKebabInput(e.target.value) })} required autoFocus />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Input value={editForm.description} onChange={e => setEditForm({ ...editForm, description: e.target.value })} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditGroup(null)}>Cancel</Button>
+              <Button type="submit">Save</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
       </Dialog>
 
       {/* Confirm Delete Dialog */}
-      <ConfirmDialog
-        open={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
-        onConfirm={() => handleDelete(confirmDelete?.id)}
-        title="Delete Group"
-        message={`Delete group "${confirmDelete?.name}"? All associated permissions will be removed.`}
-        confirmLabel="Delete"
-        danger
-      />
+      <Dialog open={!!confirmDelete} onOpenChange={() => setConfirmDelete(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Group</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            Delete group "{confirmDelete?.name}"? All associated permissions will be removed.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { handleDelete(confirmDelete?.id); setConfirmDelete(null) }}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

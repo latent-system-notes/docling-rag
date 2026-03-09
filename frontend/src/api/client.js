@@ -80,6 +80,35 @@ export const api = {
   reloadMcp: () =>
     request('/settings/reload-mcp', { method: 'POST' }),
 
+  // Browse
+  browseDirectories: (path = '') =>
+    request(`/browse/directories?path=${encodeURIComponent(path)}`),
+  browseDocumentFolders: (path = '') =>
+    request(`/browse/document-folders?path=${encodeURIComponent(path)}`),
+
+  // Files
+  listFiles: (path = '') => request(`/files?path=${encodeURIComponent(path)}`),
+  uploadFiles: (path, fileList) => {
+    const token = getToken()
+    const form = new FormData()
+    for (const f of fileList) form.append('files', f)
+    return fetch(`${BASE}/files/upload?path=${encodeURIComponent(path)}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: form,
+    }).then(async res => {
+      if (res.status === 401) { localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.href = '/login'; return }
+      if (!res.ok) { const err = await res.json().catch(() => ({ detail: res.statusText })); throw new Error(err.detail || 'Upload failed') }
+      return res.json()
+    })
+  },
+  createDirectory: (path, name) =>
+    request('/files/mkdir', { method: 'POST', body: JSON.stringify({ path, name }) }),
+  deleteFile: (path) =>
+    request('/files', { method: 'DELETE', body: JSON.stringify({ path }) }),
+  renameFile: (path, newName) =>
+    request('/files/rename', { method: 'PUT', body: JSON.stringify({ path, new_name: newName }) }),
+
   // Ingestion
   startIngestion: (opts = {}) =>
     request('/ingestion/start', { method: 'POST', body: JSON.stringify(opts) }),

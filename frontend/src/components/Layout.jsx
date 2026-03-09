@@ -1,20 +1,29 @@
 import { useState, useEffect } from 'react'
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Users, Shield, FolderTree, LogOut, Search, FileText, Menu, X, PanelLeftClose, Settings, Upload } from 'lucide-react'
+import { Outlet, NavLink, useNavigate, useLocation, Link } from 'react-router-dom'
+import { Users, Shield, FolderTree, LogOut, Search, FileText, Menu, PanelLeftClose, PanelLeftOpen, Settings, Upload, FolderOpen } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Sheet, SheetTrigger, SheetContent } from '@/components/ui/sheet'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
+
+const SIDEBAR_EXPANDED = 240  // w-60 = 15rem = 240px
+const SIDEBAR_COLLAPSED = 48  // w-12 = 3rem = 48px
 
 export default function Layout() {
   const navigate = useNavigate()
+  const location = useLocation()
   const user = JSON.parse(localStorage.getItem('user') || '{}')
   const isAdmin = user.is_admin === true
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [expanded, setExpanded] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   useEffect(() => {
     const check = () => {
       const mobile = window.innerWidth <= 768
       setIsMobile(mobile)
-      if (mobile) setSidebarOpen(false)
-      else setSidebarOpen(true)
     }
     check()
     window.addEventListener('resize', check)
@@ -28,73 +37,211 @@ export default function Layout() {
   }
 
   const handleNavClick = () => {
-    if (isMobile) setSidebarOpen(false)
+    if (isMobile) setSheetOpen(false)
   }
 
-  // Show hamburger only when sidebar is closed
-  const showHamburger = !sidebarOpen
+  // --- Nav items config ---
+  const mainNav = [
+    { to: '/search', icon: Search, label: 'Search' },
+    { to: '/documents', icon: FileText, label: 'Documents' },
+  ]
+  const adminNav = [
+    { to: '/users', icon: Users, label: 'Users' },
+    { to: '/groups', icon: Shield, label: 'Groups' },
+    { to: '/permissions', icon: FolderTree, label: 'Permissions' },
+    { to: '/files', icon: FolderOpen, label: 'Files' },
+    { to: '/ingestion', icon: Upload, label: 'Ingestion' },
+    { to: '/settings', icon: Settings, label: 'Settings' },
+  ]
 
-  return (
-    <div className="layout">
-      {showHamburger && (
-        <button className="sidebar-toggle visible" onClick={() => setSidebarOpen(true)} title="Open sidebar">
-          <Menu size={20} />
-        </button>
-      )}
+  // --- Expanded link class ---
+  const navLinkClass = ({ isActive }) =>
+    cn(
+      'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+      isActive
+        ? 'bg-accent text-accent-foreground'
+        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+    )
 
-      {isMobile && sidebarOpen && <div className="sidebar-overlay visible" onClick={() => setSidebarOpen(false)} />}
+  // --- Collapsed icon link class (static, computed from location) ---
+  const iconLinkClass = (to) =>
+    cn(
+      'flex items-center justify-center rounded-md h-9 w-9 transition-colors',
+      location.pathname.startsWith(to)
+        ? 'bg-accent text-accent-foreground'
+        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+    )
 
-      <nav className={`sidebar ${sidebarOpen ? 'open' : 'collapsed'}`}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 1.5rem', marginBottom: '2rem' }}>
-          <h2 style={{ margin: 0 }}>Docling RAG</h2>
-          <button className="btn-icon" onClick={() => setSidebarOpen(false)} title="Close sidebar">
-            {isMobile ? <X size={18} /> : <PanelLeftClose size={18} />}
-          </button>
+  // --- Full sidebar content (expanded, used in desktop expanded + mobile sheet) ---
+  const expandedContent = (
+    <>
+      <div className="flex-1 overflow-y-auto px-3 py-4">
+        <div className="space-y-1">
+          {mainNav.map(({ to, icon: Icon, label }) => (
+            <NavLink key={to} to={to} className={navLinkClass} onClick={handleNavClick}>
+              <Icon className="h-4 w-4 shrink-0" /> {label}
+            </NavLink>
+          ))}
         </div>
-
-        <NavLink to="/search" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
-          <Search size={18} /> Search
-        </NavLink>
-        <NavLink to="/documents" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
-          <FileText size={18} /> Documents
-        </NavLink>
-
         {isAdmin && (
           <>
-            <div style={{ padding: '0.75rem 1.5rem 0.25rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-dim)' }}>
-              Administration
+            <div className="px-3 py-2 mt-6 mb-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Administration
+              </span>
             </div>
-            <NavLink to="/users" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
-              <Users size={18} /> Users
-            </NavLink>
-            <NavLink to="/groups" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
-              <Shield size={18} /> Groups
-            </NavLink>
-            <NavLink to="/permissions" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
-              <FolderTree size={18} /> Permissions
-            </NavLink>
-            <NavLink to="/ingestion" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
-              <Upload size={18} /> Ingestion
-            </NavLink>
-            <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''} onClick={handleNavClick}>
-              <Settings size={18} /> Settings
-            </NavLink>
+            <div className="space-y-1">
+              {adminNav.map(({ to, icon: Icon, label }) => (
+                <NavLink key={to} to={to} className={navLinkClass} onClick={handleNavClick}>
+                  <Icon className="h-4 w-4 shrink-0" /> {label}
+                </NavLink>
+              ))}
+            </div>
           </>
         )}
-
-        <div className="sidebar-footer">
-          <div className="text-sm text-muted mb-2">
-            {user.username || 'user'}
-            {isAdmin && <span className="badge badge-green" style={{ marginLeft: '0.5rem' }}>admin</span>}
+      </div>
+      <div className="border-t p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Avatar>
+            <AvatarFallback>{(user.username || 'U')[0].toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium truncate">{user.username || 'user'}</div>
           </div>
-          <button className="btn-danger btn-sm" onClick={logout} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-            <LogOut size={14} /> Logout
-          </button>
+          {isAdmin && <Badge variant="success" className="text-[10px] px-1.5 py-0">admin</Badge>}
         </div>
-      </nav>
+        <Button variant="outline" size="sm" className="w-full gap-2" onClick={logout}>
+          <LogOut className="h-3.5 w-3.5" /> Logout
+        </Button>
+      </div>
+    </>
+  )
 
-      <main className={`main ${!sidebarOpen ? 'sidebar-collapsed' : ''}`}>
-        <Outlet />
+  // --- Icon-only sidebar content (collapsed desktop) ---
+  const collapsedContent = (
+    <>
+      <div className="flex-1 py-4 flex flex-col gap-1">
+        {mainNav.map(({ to, icon: Icon, label }) => (
+          <div key={to} className="flex items-center justify-center">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link to={to} className={iconLinkClass(to)}>
+                  <Icon className="h-4 w-4" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">{label}</TooltipContent>
+            </Tooltip>
+          </div>
+        ))}
+        {isAdmin && (
+          <>
+            <div className="my-2 border-t mx-2" />
+            {adminNav.map(({ to, icon: Icon, label }) => (
+              <div key={to} className="flex items-center justify-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link to={to} className={iconLinkClass(to)}>
+                      <Icon className="h-4 w-4" />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{label}</TooltipContent>
+                </Tooltip>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+      <div className="border-t py-3 flex flex-col items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Avatar className="cursor-default">
+              <AvatarFallback>{(user.username || 'U')[0].toUpperCase()}</AvatarFallback>
+            </Avatar>
+          </TooltipTrigger>
+          <TooltipContent side="right">{user.username || 'user'}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={logout}>
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Logout</TooltipContent>
+        </Tooltip>
+      </div>
+    </>
+  )
+
+  return (
+    <div className="flex min-h-screen">
+      {/* Mobile: Sheet sidebar */}
+      {isMobile && (
+        <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+          {!sheetOpen && (
+            <SheetTrigger asChild>
+              <Button variant="outline" size="icon" className="fixed top-3 left-3 z-[60]">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+          )}
+          <SheetContent side="left" className="w-60 p-0 flex flex-col">
+            <div className="flex h-14 items-center px-4 border-b">
+              <span className="text-lg font-semibold tracking-tight">Docling RAG</span>
+            </div>
+            {expandedContent}
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {/* Desktop: sidebar (expanded or collapsed) */}
+      {!isMobile && (
+        <nav
+          className={cn(
+            'fixed inset-y-0 left-0 z-50 flex flex-col border-r bg-sidebar sidebar-transition',
+            expanded ? 'w-60' : 'w-12'
+          )}
+        >
+          {expanded ? (
+            <>
+              {/* Expanded header */}
+              <div className="flex h-14 items-center justify-between px-4 border-b">
+                <span className="text-lg font-semibold tracking-tight">Docling RAG</span>
+                <Button variant="ghost" size="icon" onClick={() => setExpanded(false)} className="h-8 w-8">
+                  <PanelLeftClose className="h-4 w-4" />
+                </Button>
+              </div>
+              {expandedContent}
+            </>
+          ) : (
+            <>
+              {/* Collapsed header */}
+              <div className="flex h-14 items-center justify-center border-b">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" onClick={() => setExpanded(true)} className="h-8 w-8">
+                      <PanelLeftOpen className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Expand sidebar</TooltipContent>
+                </Tooltip>
+              </div>
+              {collapsedContent}
+            </>
+          )}
+        </nav>
+      )}
+
+      {/* Main content */}
+      <main
+        className={cn(
+          'flex-1 bg-muted/40 sidebar-transition min-h-screen overflow-x-hidden',
+          !isMobile ? (expanded ? 'ml-60' : 'ml-12') : 'ml-0',
+          isMobile ? 'pt-14' : ''
+        )}
+      >
+        <div className="p-3 md:p-6">
+          <Outlet />
+        </div>
       </main>
     </div>
   )

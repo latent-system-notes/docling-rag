@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
 import { Folder, File, ChevronRight, ChevronDown, RefreshCw, Loader, Plus } from 'lucide-react'
-import { ConfirmDialog, AlertDialog } from '../components/Dialog'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
 
 function TreeNode({ node, groups, onAssign, onRemove, onLoadChildren, level = 0 }) {
   const [expanded, setExpanded] = useState(level === 0)
@@ -21,25 +27,42 @@ function TreeNode({ node, groups, onAssign, onRemove, onLoadChildren, level = 0 
 
   return (
     <div style={{ marginLeft: level > 0 ? '1.25rem' : 0 }}>
-      <div className="tree-toggle" onClick={handleToggle}>
+      <div
+        className="flex items-center gap-2 py-1 px-1 rounded-md cursor-pointer hover:bg-accent transition-colors"
+        onClick={handleToggle}
+      >
         {isDir ? (
-          loading ? <Loader size={16} className="spin" /> :
-          hasChildren ? (expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />) :
-          <span style={{ width: 16, display: 'inline-block' }} />
-        ) : <span style={{ width: 16, display: 'inline-block' }} />}
-        {isDir ? <Folder size={16} style={{ color: 'var(--warning)' }} /> : <File size={16} style={{ color: 'var(--text-muted)' }} />}
-        <span>{node.name}</span>
-        <span className="tree-badges">
+          loading ? <Loader className="h-4 w-4 animate-spin-slow" /> :
+          hasChildren ? (expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />) :
+          <span className="w-4 inline-block" />
+        ) : <span className="w-4 inline-block" />}
+
+        {isDir
+          ? <Folder className="h-4 w-4 text-amber-500" />
+          : <File className="h-4 w-4 text-muted-foreground" />
+        }
+        <span className="text-sm">{node.name}</span>
+
+        <div className="flex items-center gap-1 ml-1">
           {node.groups?.map(g => (
-            <span key={g.group_id} className="tree-badge"
-              onClick={(e) => { e.stopPropagation(); onRemove(node.path, g.group_id, g.group_name) }}
-              title={`Click to remove ${g.group_name}`}>
-              {g.group_name} ×
-            </span>
+            <Tooltip key={g.group_id}>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="info"
+                  className="cursor-pointer hover:opacity-80 text-xs"
+                  onClick={(e) => { e.stopPropagation(); onRemove(node.path, g.group_id, g.group_name) }}
+                >
+                  {g.group_name} &times;
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>Click to remove {g.group_name}</TooltipContent>
+            </Tooltip>
           ))}
-        </span>
+        </div>
+
         <GroupAssigner path={node.path} groups={groups} assigned={node.groups || []} onAssign={onAssign} />
       </div>
+
       {isDir && expanded && node.children?.map((child) => (
         <TreeNode
           key={child.path}
@@ -56,26 +79,31 @@ function TreeNode({ node, groups, onAssign, onRemove, onLoadChildren, level = 0 
 }
 
 function GroupAssigner({ path, groups, assigned, onAssign }) {
-  const [open, setOpen] = useState(false)
   const available = groups.filter(g => !assigned.some(a => a.group_id === g.id))
 
   if (available.length === 0) return null
 
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-      <button className="tree-add-btn" onClick={() => setOpen(!open)} title="Assign group">
-        <Plus size={14} />
-      </button>
-      {open && (
-        <div className="tree-dropdown">
+    <span className="inline-flex items-center" onClick={e => e.stopPropagation()}>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
+                <Plus className="h-3 w-3" />
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Assign group</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start">
           {available.map(g => (
-            <div key={g.id} className="tree-dropdown-item"
-              onClick={() => { onAssign(path, g.id); setOpen(false) }}>
+            <DropdownMenuItem key={g.id} onClick={() => onAssign(path, g.id)}>
               {g.name}
-            </div>
+            </DropdownMenuItem>
           ))}
-        </div>
-      )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </span>
   )
 }
@@ -138,44 +166,60 @@ export default function PermissionsPage() {
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h2>Path Permissions</h2>
-        <button className="btn-primary" onClick={handleRefresh} disabled={refreshing}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Path Permissions</h1>
+        <Button onClick={handleRefresh} disabled={refreshing}>
+          <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin-slow")} />
           {refreshing ? 'Refreshing...' : 'Refresh Document Permissions'}
-        </button>
+        </Button>
       </div>
 
-      <div className="card">
-        <div className="text-sm text-muted mb-4">
-          Click a folder to expand. Click [+] to assign a group. Click a badge to remove it. Permissions inherit downward.
-        </div>
-        {root ? (
-          <TreeNode
-            node={root}
-            groups={groups}
-            onAssign={handleAssign}
-            onRemove={(path, groupId, groupName) => setConfirmRemove({ path, groupId, groupName })}
-            onLoadChildren={loadChildren}
-          />
-        ) : (
-          <div className="text-muted">Loading...</div>
-        )}
-      </div>
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground mb-4">
+            Click a folder to expand. Click [+] to assign a group. Click a badge to remove it. Permissions inherit downward.
+          </p>
+          {root ? (
+            <TreeNode
+              node={root}
+              groups={groups}
+              onAssign={handleAssign}
+              onRemove={(path, groupId, groupName) => setConfirmRemove({ path, groupId, groupName })}
+              onLoadChildren={loadChildren}
+            />
+          ) : (
+            <p className="text-muted-foreground">Loading...</p>
+          )}
+        </CardContent>
+      </Card>
 
-      <ConfirmDialog
-        open={!!confirmRemove}
-        onClose={() => setConfirmRemove(null)}
-        onConfirm={handleRemoveConfirmed}
-        title="Remove Permission"
-        message={`Remove "${confirmRemove?.groupName}" from this path?`}
-        confirmLabel="Remove"
-        danger
-      />
+      {/* Confirm Remove Dialog */}
+      <Dialog open={!!confirmRemove} onOpenChange={() => setConfirmRemove(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove Permission</DialogTitle>
+            <DialogDescription>Remove "{confirmRemove?.groupName}" from this path?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmRemove(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { handleRemoveConfirmed(); setConfirmRemove(null) }}>Remove</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <AlertDialog open={alert.open} onClose={() => setAlert({ ...alert, open: false })} title={alert.title} message={alert.message} />
+      {/* Alert Dialog */}
+      <Dialog open={alert.open} onOpenChange={() => setAlert({ ...alert, open: false })}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{alert.title}</DialogTitle>
+            <DialogDescription>{alert.message}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setAlert({ ...alert, open: false })}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

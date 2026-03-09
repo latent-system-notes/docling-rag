@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
@@ -30,24 +35,32 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="login-container">
-      <div className="card login-card">
-        <h3 style={{ textAlign: 'center', marginBottom: '1.5rem' }}>Docling RAG Dashboard</h3>
-        {error && <div style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: '0.75rem' }}>{error}</div>}
-        <form onSubmit={handleSubmit}>
-          <div className="form-group mb-4">
-            <label>Username</label>
-            <input value={username} onChange={e => setUsername(e.target.value)} autoFocus />
-          </div>
-          <div className="form-group mb-4">
-            <label>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} />
-          </div>
-          <button className="btn-primary" style={{ width: '100%' }} disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
-      </div>
+    <div className="flex items-center justify-center min-h-screen bg-muted/40">
+      <Card className="w-[380px]">
+        <CardHeader className="text-center">
+          <CardTitle className="text-xl">Docling RAG Dashboard</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="username">Username</Label>
+              <Input id="username" value={username} onChange={e => setUsername(e.target.value)} autoFocus />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+            </div>
+            <Button className="w-full" disabled={loading}>
+              {loading ? 'Signing in...' : 'Sign In'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   )
 }

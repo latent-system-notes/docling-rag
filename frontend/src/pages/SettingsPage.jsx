@@ -1,12 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
 import { Save, RotateCcw, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Textarea } from '@/components/ui/textarea'
+import { Separator } from '@/components/ui/separator'
+import DirectoryPicker from '@/components/DirectoryPicker'
+import FoldersPicker from '@/components/FoldersPicker'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState([])
   const [edits, setEdits] = useState({})
   const [saving, setSaving] = useState({})
-  const [message, setMessage] = useState(null)
   const [mcpDirty, setMcpDirty] = useState(false)
   const [reloading, setReloading] = useState(false)
 
@@ -16,7 +25,7 @@ export default function SettingsPage() {
       setSettings(data)
       setEdits({})
     } catch (e) {
-      setMessage({ type: 'error', text: e.message })
+      toast.error(e.message)
     }
   }, [])
 
@@ -34,15 +43,15 @@ export default function SettingsPage() {
       const res = await api.updateSetting(key, value)
       if (res.reload_mcp) {
         setMcpDirty(true)
-        setMessage({ type: 'warning', text: `"${key}" saved. Click "Reload MCP" to apply changes.` })
+        toast.warning(`"${key}" saved. Click "Reload MCP" to apply changes.`)
       } else if (res.restart_required) {
-        setMessage({ type: 'warning', text: `"${key}" saved. Server restart required for changes to take effect.` })
+        toast.warning(`"${key}" saved. Server restart required for changes to take effect.`)
       } else {
-        setMessage({ type: 'success', text: `"${key}" updated successfully.` })
+        toast.success(`"${key}" updated successfully.`)
       }
       await load()
     } catch (e) {
-      setMessage({ type: 'error', text: e.message })
+      toast.error(e.message)
     } finally {
       setSaving(prev => ({ ...prev, [key]: false }))
     }
@@ -55,10 +64,10 @@ export default function SettingsPage() {
       if (res.reload_mcp) {
         setMcpDirty(true)
       }
-      setMessage({ type: 'success', text: `"${key}" reverted to default.` })
+      toast.success(`"${key}" reverted to default.`)
       await load()
     } catch (e) {
-      setMessage({ type: 'error', text: e.message })
+      toast.error(e.message)
     } finally {
       setSaving(prev => ({ ...prev, [key]: false }))
     }
@@ -69,15 +78,14 @@ export default function SettingsPage() {
     try {
       await api.reloadMcp()
       setMcpDirty(false)
-      setMessage({ type: 'success', text: 'MCP reloaded successfully. New settings are now active.' })
+      toast.success('MCP reloaded successfully. New settings are now active.')
     } catch (e) {
-      setMessage({ type: 'error', text: `Failed to reload MCP: ${e.message}` })
+      toast.error(`Failed to reload MCP: ${e.message}`)
     } finally {
       setReloading(false)
     }
   }
 
-  // Group settings by category
   const groups = {}
   for (const s of settings) {
     if (!groups[s.group]) groups[s.group] = []
@@ -85,103 +93,99 @@ export default function SettingsPage() {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-        <h1 style={{ margin: 0 }}>Settings</h1>
-      </div>
-
-      {message && (
-        <div className={`alert alert-${message.type}`} style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '6px', background: message.type === 'error' ? 'var(--danger-bg, #fee)' : message.type === 'warning' ? 'var(--warning-bg, #fff3cd)' : 'var(--success-bg, #d4edda)', color: message.type === 'error' ? 'var(--danger, #c00)' : message.type === 'warning' ? 'var(--warning, #856404)' : 'var(--success, #155724)', border: '1px solid currentColor', fontSize: '0.875rem' }}>
-          {message.text}
-          <button onClick={() => setMessage(null)} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold', color: 'inherit' }}>&times;</button>
-        </div>
-      )}
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
 
       {Object.entries(groups).map(([groupName, items]) => {
         const groupHasReloadMcp = items.some(s => s.reload_mcp)
         return (
-          <div key={groupName} className="card" style={{ marginBottom: '1.5rem', padding: '1.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 0 1rem 0', borderBottom: '1px solid var(--border, #e0e0e0)', paddingBottom: '0.5rem' }}>
-              <h3 style={{ margin: 0, fontSize: '1rem' }}>{groupName}</h3>
+          <Card key={groupName}>
+            <CardHeader className="flex-row items-center justify-between space-y-0 pb-4">
+              <CardTitle className="text-base">{groupName}</CardTitle>
               {groupHasReloadMcp && mcpDirty && (
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={handleReloadMcp}
-                  disabled={reloading}
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                >
-                  <RefreshCw size={14} className={reloading ? 'spinning' : ''} />
+                <Button size="sm" onClick={handleReloadMcp} disabled={reloading}>
+                  <RefreshCw className={`h-3.5 w-3.5 ${reloading ? 'animate-spin-slow' : ''}`} />
                   {reloading ? 'Reloading...' : 'Reload MCP'}
-                </button>
+                </Button>
               )}
-            </div>
-            {items.map(s => {
-              const editValue = edits[s.key] !== undefined ? edits[s.key] : s.value
-              const isDirty = edits[s.key] !== undefined && edits[s.key] !== s.value
-              return (
-                <div key={s.key} style={{ marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-light, #f0f0f0)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.375rem' }}>
-                    <label style={{ fontWeight: 600, fontSize: '0.875rem' }}>{s.label}</label>
-                    {s.reload_mcp && mcpDirty && (
-                      <span className="badge badge-yellow" style={{ fontSize: '0.65rem', padding: '0.125rem 0.375rem' }}>MCP reload needed</span>
-                    )}
-                    {s.restart_required && (
-                      <span className="badge badge-yellow" style={{ fontSize: '0.65rem', padding: '0.125rem 0.375rem' }}>restart required</span>
-                    )}
-                    {s.has_override && (
-                      <span className="badge badge-blue" style={{ fontSize: '0.65rem', padding: '0.125rem 0.375rem' }}>overridden</span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-dim, #888)', marginBottom: '0.375rem' }}>{s.key}</div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
-                    {s.multiline ? (
-                      <textarea
-                        value={editValue}
-                        onChange={e => handleChange(s.key, e.target.value)}
-                        rows={4}
-                        style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.8rem' }}
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        value={editValue}
-                        onChange={e => handleChange(s.key, e.target.value)}
-                        style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.8rem' }}
-                      />
-                    )}
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => handleSave(s.key)}
-                      disabled={!isDirty || saving[s.key]}
-                      title="Save"
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                    >
-                      <Save size={14} /> Save
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => handleReset(s.key)}
-                      disabled={!s.has_override || saving[s.key]}
-                      title="Reset to default"
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                    >
-                      <RotateCcw size={14} /> Reset
-                    </button>
-                  </div>
-                  {s.has_override && s.updated_by && (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-dim, #888)', marginTop: '0.25rem' }}>
-                      Last updated by {s.updated_by} {s.updated_at ? `at ${new Date(s.updated_at).toLocaleString()}` : ''}
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {items.map((s, i) => {
+                const editValue = edits[s.key] !== undefined ? edits[s.key] : s.value
+                const isDirty = edits[s.key] !== undefined && edits[s.key] !== s.value
+                return (
+                  <div key={s.key}>
+                    {i > 0 && <Separator className="mb-4" />}
+                    <div className="flex items-center gap-2 mb-1">
+                      <Label className="font-semibold">{s.label}</Label>
+                      {s.reload_mcp && mcpDirty && <Badge variant="warning" className="text-[10px] px-1.5 py-0">MCP reload needed</Badge>}
+                      {s.restart_required && <Badge variant="warning" className="text-[10px] px-1.5 py-0">restart required</Badge>}
+                      {s.has_override && <Badge variant="info" className="text-[10px] px-1.5 py-0">overridden</Badge>}
                     </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+                    <p className="text-xs text-muted-foreground mb-2">{s.key}</p>
+                    <div className="space-y-2">
+                      {s.multiline ? (
+                        <Textarea
+                          value={editValue}
+                          onChange={e => handleChange(s.key, e.target.value)}
+                          rows={4}
+                          className="w-full font-mono text-sm"
+                        />
+                      ) : s.browse ? (
+                        <div className="flex gap-2">
+                          <Input
+                            value={editValue}
+                            onChange={e => handleChange(s.key, e.target.value)}
+                            className="flex-1 font-mono text-sm"
+                          />
+                          <DirectoryPicker
+                            value={editValue}
+                            onSelect={(path) => handleChange(s.key, path)}
+                          />
+                        </div>
+                      ) : s.browse_folders ? (
+                        <div className="flex gap-2">
+                          <Input
+                            value={editValue}
+                            onChange={e => handleChange(s.key, e.target.value)}
+                            className="flex-1 font-mono text-sm"
+                          />
+                          <FoldersPicker
+                            value={editValue}
+                            onSelect={(val) => handleChange(s.key, val)}
+                          />
+                        </div>
+                      ) : (
+                        <Input
+                          value={editValue}
+                          onChange={e => handleChange(s.key, e.target.value)}
+                          className="w-full font-mono text-sm"
+                        />
+                      )}
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => handleSave(s.key)} disabled={!isDirty || saving[s.key]}>
+                          <Save className="h-3.5 w-3.5" /> Save
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleReset(s.key)} disabled={!s.has_override || saving[s.key]}>
+                          <RotateCcw className="h-3.5 w-3.5" /> Reset
+                        </Button>
+                      </div>
+                    </div>
+                    {s.has_override && s.updated_by && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Last updated by {s.updated_by} {s.updated_at ? `at ${new Date(s.updated_at).toLocaleString()}` : ''}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </CardContent>
+          </Card>
         )
       })}
 
       {settings.length === 0 && (
-        <p className="text-muted">Loading settings...</p>
+        <p className="text-muted-foreground">Loading settings...</p>
       )}
     </div>
   )

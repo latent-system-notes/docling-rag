@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .routes import auth, users, groups, permissions, search, settings, ingestion
+from .routes import auth, users, groups, permissions, search, settings, ingestion, files, browse
 
 # React build output directory (frontend/dist after `npm run build`)
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -30,6 +30,8 @@ def create_app() -> FastAPI:
     app.include_router(search.router)
     app.include_router(settings.router)
     app.include_router(ingestion.router)
+    app.include_router(files.router)
+    app.include_router(browse.router)
 
     # Serve React static build if available
     if FRONTEND_DIR.is_dir():
