@@ -207,7 +207,7 @@ export default function IngestionPage() {
       {logs.length > 0 && (
         <div className="card" style={{ padding: '1.25rem' }}>
           <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', borderBottom: '1px solid var(--border, #e0e0e0)', paddingBottom: '0.5rem' }}>Logs</h3>
-          <div style={{ maxHeight: '400px', overflow: 'auto', fontFamily: 'monospace', fontSize: '0.75rem', lineHeight: '1.6', background: 'var(--bg-secondary, #f8f9fa)', padding: '0.75rem', borderRadius: '4px' }}>
+          <div style={{ maxHeight: '400px', overflow: 'auto', fontFamily: 'monospace', fontSize: '0.75rem', lineHeight: '1.6', background: 'var(--bg-input, #334155)', padding: '0.75rem', borderRadius: '4px' }}>
             {logs.map((log, i) => (
               <div key={i} style={{ color: LOG_COLORS[log.level] || 'inherit' }}>
                 <span style={{ color: 'var(--text-dim, #888)' }}>{log.ts.split('T')[1]}</span>{' '}
