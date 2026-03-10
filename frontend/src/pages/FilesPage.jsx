@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { api } from '../api/client'
-import { Folder, FileText, Upload, FolderPlus, Trash2, Download, Pencil, Home, AlertTriangle } from 'lucide-react'
+import { Folder, FileText, Upload, FolderPlus, Trash2, Download, Pencil, Home, AlertTriangle, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,6 +12,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { DataTable, DataTablePagination, DataTableCard, SortableHeader } from '@/components/ui/data-table'
 import { cn } from '@/lib/utils'
+import FilePreview from '../components/FilePreview'
 
 const EXT_COLORS = {
   '.pdf': 'text-red-500',
@@ -50,6 +51,7 @@ export default function FilesPage() {
   const [renameItem, setRenameItem] = useState(null)
   const [renameName, setRenameName] = useState('')
   const [deleteItem, setDeleteItem] = useState(null)
+  const [previewItem, setPreviewItem] = useState(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
@@ -176,14 +178,14 @@ export default function FilesPage() {
         const item = row.original
         return (
           <div
-            className={cn("flex items-center gap-2", item.type === 'directory' && "cursor-pointer")}
-            onClick={(e) => { if (item.type === 'directory') { e.stopPropagation(); navigateTo(item.path) } }}
+            className={cn("flex items-center gap-2", "cursor-pointer")}
+            onClick={(e) => { e.stopPropagation(); if (item.type === 'directory') navigateTo(item.path); else setPreviewItem(item) }}
           >
             {item.type === 'directory'
               ? <Folder className="h-4 w-4 text-amber-500 shrink-0" />
               : <FileText className={cn("h-4 w-4 shrink-0", EXT_COLORS[item.extension] || "text-muted-foreground")} />
             }
-            <span className={item.type === 'directory' ? 'font-medium' : ''}>{item.name}</span>
+            <span className={cn(item.type === 'directory' ? 'font-medium' : '', 'hover:underline')}>{item.name}</span>
             {item.extension && (
               <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{item.extension}</Badge>
             )}
@@ -213,11 +215,21 @@ export default function FilesPage() {
       header: () => <div className="text-right">Actions</div>,
       enableSorting: false,
       enableResizing: false,
-      size: 130,
+      size: 165,
       cell: ({ row }) => {
         const item = row.original
         return (
           <div className="flex gap-1 justify-end">
+            {item.type === 'file' && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); setPreviewItem(item) }}>
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Preview</TooltipContent>
+              </Tooltip>
+            )}
             {item.type === 'file' && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -379,6 +391,14 @@ export default function FilesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Preview Dialog */}
+      <FilePreview
+        open={!!previewItem}
+        onClose={() => setPreviewItem(null)}
+        filePath={previewItem?.path}
+        fileName={previewItem?.name}
+      />
 
       {/* Delete Dialog */}
       <Dialog open={!!deleteItem} onOpenChange={() => setDeleteItem(null)}>

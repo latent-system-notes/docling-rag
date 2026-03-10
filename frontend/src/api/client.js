@@ -116,6 +116,19 @@ export const api = {
   renameFile: (path, newName) =>
     request('/files/rename', { method: 'PUT', body: JSON.stringify({ path, new_name: newName }) }),
 
+  // File preview (returns blob)
+  getPreviewBlob: async (path) => {
+    const token = getToken()
+    const res = await fetch(`${BASE}/files/preview?path=${encodeURIComponent(path)}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (res.status === 401) { localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.href = '/login'; return }
+    if (!res.ok) { const err = await res.json().catch(() => ({ detail: res.statusText })); throw new Error(err.detail || 'Preview failed') }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    return { blob, url }
+  },
+
   // Ingestion
   startIngestion: (opts = {}) =>
     request('/ingestion/start', { method: 'POST', body: JSON.stringify(opts) }),
