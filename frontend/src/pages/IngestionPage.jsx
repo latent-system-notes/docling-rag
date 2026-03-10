@@ -22,6 +22,7 @@ const STATUS_COLORS = {
 const LOG_COLORS = {
   ERROR: 'text-red-600',
   WARNING: 'text-amber-600',
+  SKIP: 'text-muted-foreground',
   INFO: '',
 }
 
@@ -187,6 +188,24 @@ export default function IngestionPage() {
             </Badge>
           </CardHeader>
           <CardContent className="space-y-4">
+            {status.folders_resolved && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
+                <span className="font-medium text-amber-600">Folder filter active:</span>{' '}
+                {status.folders_resolved.map((f, i) => (
+                  <Badge key={i} variant="outline" className="ml-1 font-mono text-xs">{f}</Badge>
+                ))}
+                <p className="text-xs text-muted-foreground mt-1">
+                  Only files inside these subfolders are ingested. Files in the root or other folders are not included.
+                </p>
+              </div>
+            )}
+            {status.force && (
+              <div className="rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-sm">
+                <span className="font-medium text-blue-600">Force re-ingest:</span>{' '}
+                All files will be re-processed even if already ingested.
+              </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <Stat label="Total files" value={status.total_files} />
               <Stat label="Processed" value={status.processed} className="text-emerald-600" />
@@ -224,7 +243,7 @@ export default function IngestionPage() {
                 {logs.map((log, i) => (
                   <div key={i} className={LOG_COLORS[log.level] || ''}>
                     <span className="text-muted-foreground">{log.ts.split('T')[1]}</span>{' '}
-                    {log.level !== 'INFO' && <span>[{log.level}] </span>}
+                    {!['INFO'].includes(log.level) && <span>[{log.level}] </span>}
                     {log.msg}
                   </div>
                 ))}

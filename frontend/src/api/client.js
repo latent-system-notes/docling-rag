@@ -67,6 +67,10 @@ export const api = {
   getTreeChildren: (path = '') => request(`/permissions/tree/children?path=${encodeURIComponent(path)}`),
   refreshPermissions: () => request('/permissions/refresh', { method: 'POST' }),
 
+  // Chunks
+  listChunks: (q = '', docId = '', fileName = '', page = 1, pageSize = 20) =>
+    request(`/chunks?q=${encodeURIComponent(q)}&doc_id=${encodeURIComponent(docId)}&file_name=${encodeURIComponent(fileName)}&page=${page}&page_size=${pageSize}`),
+
   // Search (user-facing, auto-filtered by groups)
   search: (q, topK = 10) => request(`/search?q=${encodeURIComponent(q)}&top_k=${topK}`),
   myDocuments: (limit = 50, offset = 0) => request(`/search/documents?limit=${limit}&offset=${offset}`),

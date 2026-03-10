@@ -15,8 +15,35 @@ _pool_lock = threading.Lock()
 
 
 def _normalize_path(p: str) -> str:
-    """Normalize path separators to forward slashes and strip trailing slashes."""
-    return p.replace("\\", "/").rstrip("/")
+    """Normalize path to absolute form with forward slashes, no trailing slash.
+
+    Relative paths are resolved against DOCUMENTS_DIR so that all stored paths
+    are always absolute and consistent regardless of the working directory.
+    """
+    n = p.replace("\\", "/").rstrip("/")
+    try:
+        docs_dir = config("DOCUMENTS_DIR")
+        docs_dir_abs = str(docs_dir.resolve()).replace("\\", "/").rstrip("/")
+        if not n.startswith(docs_dir_abs):
+            # Relative path like "docs/data" — resolve via DOCUMENTS_DIR parent
+            candidate = Path(n)
+            resolved = str(candidate.resolve()).replace("\\", "/").rstrip("/")
+            if resolved.startswith(docs_dir_abs) or docs_dir_abs.startswith(resolved):
+                n = resolved
+            else:
+                # Path component matches inside DOCUMENTS_DIR
+                docs_cfg = str(docs_dir).replace("\\", "/").rstrip("/")
+                if n.startswith(docs_cfg + "/") or n == docs_cfg:
+                    suffix = n[len(docs_cfg):]
+                    n = docs_dir_abs + suffix
+                elif n.startswith(docs_cfg.split("/")[-1] + "/"):
+                    # e.g. "docs/file.pdf" when DOCUMENTS_DIR is "/workspace/docs"
+                    dir_name = docs_cfg.split("/")[-1]
+                    suffix = n[len(dir_name):]
+                    n = docs_dir_abs + suffix
+    except Exception:
+        pass
+    return n
 
 
 def get_pool() -> ConnectionPool:
@@ -101,12 +128,15 @@ def search_vectors(query_vector: np.ndarray, top_k: int, groups: list[str] | Non
             query_vector = query_vector[0]
         vec_list = query_vector.tolist()
         with get_pool().connection() as conn:
-            if groups:
+            if groups is not None:
                 rows = conn.execute(
                     """SELECT c.id, c.text, c.doc_id, c.page_num, c.doc_type, c.language, c.file_path, c.ingested_at, c.chunk_index,
                         1 - (c.embedding <=> %s::vector) AS score
                     FROM chunks c
-                    WHERE c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s))
+                    WHERE (
+                        c.doc_id NOT IN (SELECT DISTINCT dp.doc_id FROM document_permissions dp)
+                        OR c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s))
+                    )
                     ORDER BY c.embedding <=> %s::vector LIMIT %s""",
                     (vec_list, groups, vec_list, top_k),
                 ).fetchall()
@@ -139,12 +169,15 @@ def search_fulltext(query: str, top_k: int = DEFAULT_TOP_K, groups: list[str] | 
     tsquery = " | ".join(tokens)
     try:
         with get_pool().connection() as conn:
-            if groups:
+            if groups is not None:
                 rows = conn.execute(
                     """SELECT c.id, ts_rank_cd(c.text_search, to_tsquery('simple', %s)) AS rank
                     FROM chunks c
                     WHERE c.text_search @@ to_tsquery('simple', %s)
-                      AND c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s))
+                      AND (
+                        c.doc_id NOT IN (SELECT DISTINCT dp.doc_id FROM document_permissions dp)
+                        OR c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s))
+                      )
                     ORDER BY rank DESC LIMIT %s""",
                     (tsquery, tsquery, groups, top_k),
                 ).fetchall()
@@ -231,8 +264,11 @@ def list_documents(limit: int | None = None, offset: int = 0, groups: list[str] 
     try:
         groups_filter = ""
         params: list = []
-        if groups:
-            groups_filter = "WHERE c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s))"
+        if groups is not None:
+            groups_filter = """WHERE (
+                c.doc_id NOT IN (SELECT DISTINCT dp.doc_id FROM document_permissions dp)
+                OR c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s))
+            )"""
             params.append(groups)
 
         base = f"""SELECT c.doc_id, c.file_path, c.doc_type, c.language,
@@ -621,8 +657,8 @@ def get_path_permissions_for_path(path: str) -> list[dict]:
 def compute_effective_groups(file_path: str) -> list[int]:
     """Compute effective group IDs for a file by matching all ancestor paths in path_permissions.
 
-    Normalizes both the file_path and stored path_permissions to forward slashes
-    so that Windows and Unix paths match correctly.
+    Both file_path and stored path_permissions are normalized via _normalize_path
+    (forward slashes, consistent DOCUMENTS_DIR prefix) so they always match.
     """
     normalized = _normalize_path(file_path)
     parts = normalized.split("/")
@@ -630,18 +666,14 @@ def compute_effective_groups(file_path: str) -> list[int]:
     ancestors = []
     for i in range(1, len(parts) + 1):
         ancestors.append("/".join(parts[:i]))
-        # Also try with trailing slash for directory-style entries
-        if i < len(parts):
-            ancestors.append("/".join(parts[:i]) + "/")
     try:
         with get_pool().connection() as conn:
-            # Compare normalized paths: normalize stored path_permissions paths too
             rows = conn.execute(
                 """SELECT DISTINCT pp.group_id
                 FROM path_permissions pp
                 WHERE REPLACE(REPLACE(pp.path, '\\', '/'), '//', '/') = ANY(%s)
                    OR RTRIM(REPLACE(REPLACE(pp.path, '\\', '/'), '//', '/'), '/') = ANY(%s)""",
-                (ancestors, [a.rstrip("/") for a in ancestors]),
+                (ancestors, ancestors),
             ).fetchall()
         return [r[0] for r in rows]
     except Exception as e:
@@ -751,14 +783,126 @@ def delete_setting(key: str) -> bool:
         raise StorageError(f"Failed to delete setting: {e}") from e
 
 
+def list_chunks(search: str | None = None, doc_id: str | None = None,
+                file_name: str | None = None,
+                limit: int = 20, offset: int = 0,
+                groups: list[str] | None = None) -> list[dict]:
+    try:
+        where_clauses, params = [], []
+        if groups is not None:
+            where_clauses.append(
+                "(c.doc_id NOT IN (SELECT DISTINCT dp.doc_id FROM document_permissions dp) "
+                "OR c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp "
+                "JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s)))"
+            )
+            params.append(groups)
+        if doc_id:
+            where_clauses.append("c.doc_id::text ILIKE %s")
+            params.append(f"%{doc_id}%")
+        if file_name:
+            where_clauses.append("c.file_path ILIKE %s")
+            params.append(f"%{file_name}%")
+        if search:
+            where_clauses.append("c.text ILIKE %s")
+            params.append(f"%{search}%")
+        where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        query = f"""SELECT c.id, c.doc_id, c.text, c.page_num, c.doc_type,
+                        c.language, c.file_path, c.ingested_at, c.chunk_index
+                    FROM chunks c {where}
+                    ORDER BY c.ingested_at DESC, c.chunk_index
+                    LIMIT %s OFFSET %s"""
+        params.extend([limit, offset])
+        with get_pool().connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            {
+                "id": r[0], "doc_id": r[1], "text": r[2][:200] if r[2] else "",
+                "page_num": r[3], "doc_type": r[4], "language": r[5],
+                "file_path": r[6], "ingested_at": r[7].isoformat() if r[7] else "",
+                "chunk_index": r[8],
+            }
+            for r in rows
+        ]
+    except StorageError:
+        raise
+    except Exception as e:
+        raise StorageError(f"Failed to list chunks: {e}") from e
+
+
+def count_chunks(search: str | None = None, doc_id: str | None = None,
+                 file_name: str | None = None,
+                 groups: list[str] | None = None) -> int:
+    try:
+        where_clauses, params = [], []
+        if groups is not None:
+            where_clauses.append(
+                "(c.doc_id NOT IN (SELECT DISTINCT dp.doc_id FROM document_permissions dp) "
+                "OR c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp "
+                "JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s)))"
+            )
+            params.append(groups)
+        if doc_id:
+            where_clauses.append("c.doc_id::text ILIKE %s")
+            params.append(f"%{doc_id}%")
+        if file_name:
+            where_clauses.append("c.file_path ILIKE %s")
+            params.append(f"%{file_name}%")
+        if search:
+            where_clauses.append("c.text ILIKE %s")
+            params.append(f"%{search}%")
+        where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        with get_pool().connection() as conn:
+            return conn.execute(f"SELECT COUNT(*) FROM chunks c {where}", params).fetchone()[0]
+    except StorageError:
+        raise
+    except Exception as e:
+        raise StorageError(f"Failed to count chunks: {e}") from e
+
+
 def refresh_all_document_permissions() -> int:
-    """Recompute document_permissions for all documents based on current path_permissions."""
+    """Recompute document_permissions for all documents based on current path_permissions.
+
+    First normalizes any inconsistent paths in path_permissions to absolute form,
+    then recomputes the document_permissions cache for every document.
+    """
+    _normalize_stored_paths()
     docs = list_documents()
     count = 0
     for doc in docs:
+        doc_id = doc["doc_id"]
         group_ids = compute_effective_groups(doc["file_path"])
-        if group_ids:
-            doc_id = doc["doc_id"]
-            set_document_permissions(doc_id, group_ids)
-            count += 1
+        set_document_permissions(doc_id, group_ids)
+        count += 1
     return count
+
+
+def _normalize_stored_paths():
+    """Normalize all path_permissions entries to consistent form.
+
+    Fixes legacy entries that may have absolute paths, backslashes, etc.
+    """
+    try:
+        with get_pool().connection() as conn:
+            rows = conn.execute("SELECT id, path FROM path_permissions").fetchall()
+            for row_id, path in rows:
+                normalized = _normalize_path(path)
+                if normalized != path:
+                    # Check if normalized path + same group already exists (avoid unique conflict)
+                    existing = conn.execute(
+                        """SELECT id FROM path_permissions
+                        WHERE path = %s AND group_id = (SELECT group_id FROM path_permissions WHERE id = %s)
+                        AND id != %s""",
+                        (normalized, row_id, row_id),
+                    ).fetchone()
+                    if existing:
+                        # Duplicate after normalization — delete this one
+                        conn.execute("DELETE FROM path_permissions WHERE id = %s", (row_id,))
+                    else:
+                        conn.execute(
+                            "UPDATE path_permissions SET path = %s WHERE id = %s",
+                            (normalized, row_id),
+                        )
+                    logger.info(f"Normalized path_permission id={row_id}: {path!r} → {normalized!r}")
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to normalize stored paths: {e}")

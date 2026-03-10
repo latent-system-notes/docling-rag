@@ -10,6 +10,7 @@ import PermissionsPage from './pages/PermissionsPage'
 import SettingsPage from './pages/SettingsPage'
 import IngestionPage from './pages/IngestionPage'
 import FilesPage from './pages/FilesPage'
+import ChunksPage from './pages/ChunksPage'
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem('token')
@@ -37,6 +38,7 @@ export default function App() {
         {/* All users */}
         <Route path="search" element={<SearchPage />} />
         <Route path="documents" element={<DocumentsPage />} />
+        <Route path="chunks" element={<ChunksPage />} />
 
         {/* Admin only */}
         <Route path="users" element={<AdminRoute><UsersPage /></AdminRoute>} />

@@ -1,15 +1,15 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../api/client'
-import { Pencil, Trash2, KeyRound, Plus, UserPlus, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Pencil, Trash2, KeyRound, Plus, UserPlus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { DataTable, DataTablePagination, DataTableCard, SortableHeader } from '@/components/ui/data-table'
 
 function sanitizeUsername(str) {
   return str.toLowerCase().replace(/[^a-z0-9_-]/g, '')
@@ -49,7 +49,6 @@ export default function UsersPage() {
   useEffect(() => { loadGroups() }, [])
 
   const handleSearch = (v) => { setSearch(v); setPage(1) }
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -121,18 +120,93 @@ export default function UsersPage() {
 
   const availableGroups = allGroups.filter(g => !userGroups.some(ug => ug.id === g.id))
 
+  const columns = useMemo(() => [
+    {
+      accessorKey: 'username',
+      header: ({ column }) => <SortableHeader column={column} title="Username" />,
+      cell: ({ getValue }) => <span className="font-medium">{getValue()}</span>,
+      size: 150,
+    },
+    {
+      accessorKey: 'display_name',
+      header: ({ column }) => <SortableHeader column={column} title="Name" />,
+      size: 150,
+    },
+    {
+      accessorKey: 'email',
+      header: ({ column }) => <SortableHeader column={column} title="Email" />,
+      cell: ({ getValue }) => <span className="text-muted-foreground text-sm">{getValue()}</span>,
+      size: 200,
+    },
+    {
+      accessorKey: 'auth_type',
+      header: ({ column }) => <SortableHeader column={column} title="Auth" />,
+      cell: ({ getValue }) => <Badge variant="info">{getValue()}</Badge>,
+      size: 90,
+    },
+    {
+      accessorKey: 'is_admin',
+      header: ({ column }) => <SortableHeader column={column} title="Admin" />,
+      cell: ({ getValue }) => getValue() ? <Badge variant="success">Yes</Badge> : <span className="text-muted-foreground">No</span>,
+      size: 80,
+    },
+    {
+      accessorKey: 'is_active',
+      header: ({ column }) => <SortableHeader column={column} title="Active" />,
+      cell: ({ getValue }) => getValue() ? <Badge variant="success">Yes</Badge> : <Badge variant="destructive">No</Badge>,
+      size: 80,
+    },
+    {
+      id: 'actions',
+      header: () => <div className="text-right">Actions</div>,
+      enableSorting: false,
+      enableResizing: false,
+      size: 130,
+      cell: ({ row }) => {
+        const u = row.original
+        return (
+          <div className="flex gap-1 justify-end">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleEdit(u) }}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Edit</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-600" onClick={(e) => { e.stopPropagation(); setResetPw({ show: true, userId: u.id, username: u.username, password: '' }) }}>
+                  <KeyRound className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Reset Password</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={(e) => { e.stopPropagation(); setConfirmDelete(u) }}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Delete</TooltipContent>
+            </Tooltip>
+          </div>
+        )
+      },
+    },
+  ], [])
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full gap-4 overflow-hidden">
+      <div className="flex items-center justify-between shrink-0">
         <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
         <Button onClick={() => setShowCreate(!showCreate)}>
           {showCreate ? <><X className="h-4 w-4" /> Cancel</> : <><UserPlus className="h-4 w-4" /> New User</>}
         </Button>
       </div>
 
-      {/* Create User Form */}
       {showCreate && (
-        <Card>
+        <Card className="shrink-0">
           <CardHeader>
             <CardTitle>Create User</CardTitle>
           </CardHeader>
@@ -150,9 +224,7 @@ export default function UsersPage() {
                 <div className="space-y-2">
                   <Label>Auth Type</Label>
                   <Select value={form.auth_type} onValueChange={v => setForm({ ...form, auth_type: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="local">Local</SelectItem>
                       <SelectItem value="ldap">LDAP</SelectItem>
@@ -172,9 +244,7 @@ export default function UsersPage() {
                 <div className="space-y-2">
                   <Label>Admin</Label>
                   <Select value={String(form.is_admin)} onValueChange={v => setForm({ ...form, is_admin: v === 'true' })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="false">No</SelectItem>
                       <SelectItem value="true">Yes</SelectItem>
@@ -188,8 +258,7 @@ export default function UsersPage() {
         </Card>
       )}
 
-      {/* Search */}
-      <Card>
+      <Card className="shrink-0">
         <CardContent className="py-3">
           <Input
             value={search}
@@ -200,118 +269,28 @@ export default function UsersPage() {
         </CardContent>
       </Card>
 
-      {/* Users table + Groups panel */}
-      <div className="flex flex-col lg:flex-row gap-6">
-        <Card className="flex-[2] min-w-0">
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Username</TableHead>
-                  <TableHead className="hidden sm:table-cell">Name</TableHead>
-                  <TableHead className="hidden lg:table-cell">Email</TableHead>
-                  <TableHead className="hidden md:table-cell">Auth</TableHead>
-                  <TableHead className="hidden md:table-cell">Admin</TableHead>
-                  <TableHead className="hidden md:table-cell">Active</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map(u => (
-                  <TableRow
-                    key={u.id}
-                    className="cursor-pointer"
-                    onClick={() => selectUser(u)}
-                    data-state={selectedUser?.id === u.id ? 'selected' : undefined}
-                  >
-                    <TableCell className="font-medium">{u.username}</TableCell>
-                    <TableCell className="hidden sm:table-cell">{u.display_name}</TableCell>
-                    <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">{u.email}</TableCell>
-                    <TableCell className="hidden md:table-cell"><Badge variant="info">{u.auth_type}</Badge></TableCell>
-                    <TableCell className="hidden md:table-cell">{u.is_admin ? <Badge variant="success">Yes</Badge> : <span className="text-muted-foreground">No</span>}</TableCell>
-                    <TableCell className="hidden md:table-cell">{u.is_active ? <Badge variant="success">Yes</Badge> : <Badge variant="destructive">No</Badge>}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex gap-1 justify-end">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleEdit(u) }}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Edit</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-600" onClick={(e) => { e.stopPropagation(); setResetPw({ show: true, userId: u.id, username: u.username, password: '' }) }}>
-                              <KeyRound className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Reset Password</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={(e) => { e.stopPropagation(); setConfirmDelete(u) }}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Delete</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {users.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">No users found</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+      <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
+        <DataTableCard className="flex-[2]">
+          <DataTable
+            columns={columns}
+            data={users}
+            onRowClick={selectUser}
+            selectedRowId={selectedUser?.id}
+            noResultsMessage="No users found"
+          />
+          <DataTablePagination
+            total={total}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizes={PAGE_SIZES}
+            noun="user"
+          />
+        </DataTableCard>
 
-            {/* Pagination footer */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t">
-              <div className="text-sm text-muted-foreground">
-                {total} user{total !== 1 ? 's' : ''}
-              </div>
-              <div className="flex items-center gap-3 sm:gap-6 flex-wrap justify-center">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</span>
-                  <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1) }}>
-                    <SelectTrigger className="h-8 w-[70px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZES.map(s => (
-                        <SelectItem key={s} value={String(s)}>{s}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <span className="text-sm text-muted-foreground whitespace-nowrap">
-                  Page {page} of {totalPages}
-                </span>
-                <div className="flex items-center gap-1">
-                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)}>
-                    <ChevronsLeft className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
-                    <ChevronsRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Groups side panel */}
         {selectedUser && (
-          <Card className="flex-1">
+          <Card className="flex-1 min-h-0 overflow-auto">
             <CardHeader className="flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base">{selectedUser.username} &mdash; Groups</CardTitle>
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedUser(null)}>
@@ -366,9 +345,7 @@ export default function UsersPage() {
               <div className="space-y-2">
                 <Label>Auth Type</Label>
                 <Select value={editForm.auth_type} onValueChange={v => setEditForm({ ...editForm, auth_type: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="local">Local</SelectItem>
                     <SelectItem value="ldap">LDAP</SelectItem>
@@ -378,9 +355,7 @@ export default function UsersPage() {
               <div className="space-y-2">
                 <Label>Admin</Label>
                 <Select value={String(editForm.is_admin)} onValueChange={v => setEditForm({ ...editForm, is_admin: v === 'true' })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="false">No</SelectItem>
                     <SelectItem value="true">Yes</SelectItem>
@@ -390,9 +365,7 @@ export default function UsersPage() {
               <div className="space-y-2">
                 <Label>Active</Label>
                 <Select value={String(editForm.is_active)} onValueChange={v => setEditForm({ ...editForm, is_active: v === 'true' })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="true">Yes</SelectItem>
                     <SelectItem value="false">No</SelectItem>

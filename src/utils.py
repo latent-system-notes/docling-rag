@@ -20,27 +20,21 @@ logger = get_logger(__name__)
 def make_doc_id(file_path: str | Path) -> str:
     """Compute a stable doc_id from file_path.
 
-    Uses the normalized display path (forward slashes, relative to DOCUMENTS_DIR)
-    so the same file produces the same doc_id on Windows and Linux.
+    Uses the resolved absolute path (forward slashes) so the same file
+    always produces the same doc_id regardless of how the path is specified.
     """
     import hashlib
     return hashlib.md5(display_path(file_path).encode()).hexdigest()
 
 
 def display_path(file_path: str | Path) -> str:
-    """Return a normalized path with forward slashes, relative to DOCUMENTS_DIR.
+    """Return the absolute path with forward slashes.
 
-    Falls back to the path as-given if not inside DOCUMENTS_DIR.
+    Resolves the file path to its absolute form so all stored paths
+    are consistent regardless of working directory or OS.
     """
     fp = Path(file_path)
-    try:
-        docs_dir = config("DOCUMENTS_DIR")
-        docs_dir_resolved = Path(docs_dir).resolve()
-        rel = fp.resolve().relative_to(docs_dir_resolved)
-        prefix = str(docs_dir).replace("\\", "/").rstrip("/")
-        return prefix + "/" + str(rel).replace("\\", "/")
-    except (ValueError, TypeError):
-        return str(fp).replace("\\", "/")
+    return str(fp.resolve()).replace("\\", "/")
 _console = Console(force_terminal=True, legacy_windows=False)
 _embedder_cache = None
 _embedder_lock = threading.Lock()
@@ -171,12 +165,18 @@ def cleanup_all_resources() -> None:
     _cleanup_done = True
     _console.print("[cyan]Cleaning up embedder...[/cyan]")
     cleanup_embedder()
-    from .ingestion.chunker import cleanup_chunker
-    _console.print("[cyan]Cleaning up chunker...[/cyan]")
-    cleanup_chunker()
-    from .storage.postgres import cleanup_pool
-    _console.print("[cyan]Cleaning up connection pool ...[/cyan]")
-    cleanup_pool()
+    try:
+        from .ingestion.chunker import cleanup_chunker
+        _console.print("[cyan]Cleaning up chunker...[/cyan]")
+        cleanup_chunker()
+    except (ImportError, RuntimeError):
+        pass
+    try:
+        from .storage.postgres import cleanup_pool
+        _console.print("[cyan]Cleaning up connection pool ...[/cyan]")
+        cleanup_pool()
+    except (ImportError, RuntimeError):
+        pass
     _console.print("[cyan]Cleaning up gc ...[/cyan]")
     gc.collect()
     _console.print("[cyan]Cleaning up cuda ...[/cyan]")

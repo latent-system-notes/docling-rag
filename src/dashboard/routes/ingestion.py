@@ -97,7 +97,9 @@ def _run_ingestion(job: dict):
             include_folders = config("INCLUDE_FOLDERS")
 
         if include_folders:
+            job["folders_resolved"] = include_folders
             _add_log(job, "INFO", f"Folder filter active: {', '.join(include_folders)}")
+            _add_log(job, "INFO", f"Only files inside these subfolders of {doc_path} will be ingested")
 
         if not Path(doc_path).exists():
             _add_log(job, "ERROR", f"Documents directory not found: {doc_path}")
@@ -127,14 +129,15 @@ def _run_ingestion(job: dict):
             if not job["force"]:
                 with lock:
                     if document_exists(f):
+                        _add_log(job, "SKIP", f"[SKIPPED] {f.name} — already ingested")
                         return False, True, False
 
             try:
                 meta = ingest_document(f)
-                _add_log(job, "INFO", f"{f.name} ({meta.num_chunks} chunks)")
+                _add_log(job, "INFO", f"[OK] {f.name} ({meta.num_chunks} chunks)")
                 return True, False, False
             except Exception as e:
-                _add_log(job, "ERROR", f"{f.name}: {e}")
+                _add_log(job, "ERROR", f"[FAILED] {f.name} — {e}")
                 return False, False, True
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -217,6 +220,9 @@ async def get_status():
         "started_at": job["started_at"],
         "finished_at": job["finished_at"],
         "started_by": job["started_by"],
+        "folders": job.get("folders") or None,
+        "folders_resolved": job.get("folders_resolved") or None,
+        "force": job.get("force", False),
         "total_files": job["total_files"],
         "processed": job["processed"],
         "skipped": job["skipped"],

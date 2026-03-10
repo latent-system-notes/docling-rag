@@ -28,13 +28,16 @@ async def list_all_path_permissions():
 
 @router.post("/paths", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 async def add_new_path_permission(req: PathPermissionRequest):
-    return add_path_permission(req.path, req.group_id)
+    result = add_path_permission(req.path, req.group_id)
+    refresh_all_document_permissions()
+    return result
 
 
 @router.delete("/paths", dependencies=[Depends(require_admin)])
 async def remove_existing_path_permission(req: PathPermissionRequest):
     if not remove_path_permission(req.path, req.group_id):
         raise HTTPException(status_code=404, detail="Path permission not found")
+    refresh_all_document_permissions()
     return {"ok": True}
 
 
@@ -55,13 +58,13 @@ async def get_tree_children(path: str = Query("", alias="path")):
     Otherwise, returns the children of the specified path.
     """
     docs_dir = config("DOCUMENTS_DIR")
-    docs_dir_str = str(docs_dir).replace("\\", "/").rstrip("/")
+    docs_dir_str = str(docs_dir.resolve()).replace("\\", "/").rstrip("/")
 
     # Build permission lookup (only needs paths that start with the requested prefix)
     path_perms = list_path_permissions()
     perm_map: dict[str, list[dict]] = {}
     for pp in path_perms:
-        normalized = pp["path"].replace("\\", "/").rstrip("/")
+        normalized = _normalize_path(pp["path"])
         perm_map.setdefault(normalized, []).append(
             {"group_id": pp["group_id"], "group_name": pp["group_name"]}
         )
@@ -100,25 +103,10 @@ async def get_tree_children(path: str = Query("", alias="path")):
 
 
 def _resolve_fs_path(docs_dir_str: str, requested: str) -> Path | None:
-    """Resolve a normalized tree path back to a filesystem Path."""
-    docs_dir = Path(docs_dir_str.replace("/", "\\") if "\\" in str(Path(".")) else docs_dir_str)
-
-    if requested == docs_dir_str:
-        return docs_dir
-
-    # requested might be "docs/test/subfolder", docs_dir_str might be "docs/test"
-    # so the relative part is "subfolder"
-    if requested.startswith(docs_dir_str + "/"):
-        relative = requested[len(docs_dir_str) + 1:]
-        candidate = docs_dir / relative.replace("/", "\\") if "\\" in str(Path(".")) else docs_dir / relative
-        if candidate.exists():
-            return candidate
-
-    # Fallback: try as-is
-    candidate = Path(requested)
+    """Resolve a tree path (absolute, forward slashes) back to a filesystem Path."""
+    candidate = Path(requested.replace("/", "\\") if "\\" in str(Path(".")) else requested)
     if candidate.exists():
         return candidate
-
     return None
 
 

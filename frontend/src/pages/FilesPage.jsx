@@ -1,17 +1,16 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { api } from '../api/client'
-import { Folder, FileText, Upload, FolderPlus, Trash2, Download, Pencil, Home, AlertTriangle, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Folder, FileText, Upload, FolderPlus, Trash2, Download, Pencil, Home, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select'
+import { DataTable, DataTablePagination, DataTableCard, SortableHeader } from '@/components/ui/data-table'
 import { cn } from '@/lib/utils'
 
 const EXT_COLORS = {
@@ -69,18 +68,14 @@ export default function FilesPage() {
 
   useEffect(() => { fetchItems(currentPath) }, [currentPath, fetchItems])
 
-  const navigateTo = (path) => {
-    setCurrentPath(path)
-  }
+  const navigateTo = (path) => setCurrentPath(path)
 
   const breadcrumbs = () => {
     if (!currentPath) return []
     return currentPath.split('/').filter(Boolean)
   }
 
-  const breadcrumbPath = (index) => {
-    return breadcrumbs().slice(0, index + 1).join('/')
-  }
+  const breadcrumbPath = (index) => breadcrumbs().slice(0, index + 1).join('/')
 
   const handleUpload = async (fileList) => {
     if (!fileList || fileList.length === 0) return
@@ -170,14 +165,94 @@ export default function FilesPage() {
 
   const crumbs = breadcrumbs()
 
-  // Pagination
   const totalItems = items.length
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
   const pagedItems = items.slice((page - 1) * pageSize, page * pageSize)
 
+  const columns = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ column }) => <SortableHeader column={column} title="Name" />,
+      cell: ({ row }) => {
+        const item = row.original
+        return (
+          <div
+            className={cn("flex items-center gap-2", item.type === 'directory' && "cursor-pointer")}
+            onClick={(e) => { if (item.type === 'directory') { e.stopPropagation(); navigateTo(item.path) } }}
+          >
+            {item.type === 'directory'
+              ? <Folder className="h-4 w-4 text-amber-500 shrink-0" />
+              : <FileText className={cn("h-4 w-4 shrink-0", EXT_COLORS[item.extension] || "text-muted-foreground")} />
+            }
+            <span className={item.type === 'directory' ? 'font-medium' : ''}>{item.name}</span>
+            {item.extension && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{item.extension}</Badge>
+            )}
+          </div>
+        )
+      },
+      size: 350,
+    },
+    {
+      accessorKey: 'size',
+      header: ({ column }) => <SortableHeader column={column} title="Size" className="justify-end" />,
+      cell: ({ row }) => (
+        <div className="text-right text-sm text-muted-foreground">
+          {row.original.type === 'file' ? formatSize(row.original.size) : '-'}
+        </div>
+      ),
+      size: 100,
+    },
+    {
+      accessorKey: 'modified',
+      header: ({ column }) => <SortableHeader column={column} title="Modified" className="justify-end" />,
+      cell: ({ getValue }) => <div className="text-right text-sm text-muted-foreground">{formatDate(getValue())}</div>,
+      size: 180,
+    },
+    {
+      id: 'actions',
+      header: () => <div className="text-right">Actions</div>,
+      enableSorting: false,
+      enableResizing: false,
+      size: 130,
+      cell: ({ row }) => {
+        const item = row.original
+        return (
+          <div className="flex gap-1 justify-end">
+            {item.type === 'file' && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDownload(item) }}>
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Download</TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); setRenameItem(item); setRenameName(item.name) }}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Rename</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteItem(item) }}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Delete</TooltipContent>
+            </Tooltip>
+          </div>
+        )
+      },
+    },
+  ], [currentPath])
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+    <div className="flex flex-col h-full gap-4 overflow-hidden">
+      <div className="flex items-center justify-between flex-wrap gap-3 shrink-0">
         <h1 className="text-2xl font-semibold tracking-tight">Files</h1>
         <div className="flex gap-2">
           <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
@@ -190,8 +265,7 @@ export default function FilesPage() {
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onFileInputChange} />
       </div>
 
-      {/* Breadcrumb */}
-      <Breadcrumb>
+      <Breadcrumb className="shrink-0">
         <BreadcrumbList>
           <BreadcrumbItem>
             <Tooltip>
@@ -220,13 +294,12 @@ export default function FilesPage() {
         </BreadcrumbList>
       </Breadcrumb>
 
-      {/* Drop zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         className={cn(
-          "rounded-lg transition-all text-center flex items-center justify-center",
+          "rounded-lg transition-all text-center flex items-center justify-center shrink-0",
           dragOver ? "border-2 border-dashed border-primary bg-primary/5 min-h-[80px] p-4" : "",
           uploading ? "p-4" : ""
         )}
@@ -235,130 +308,30 @@ export default function FilesPage() {
         {uploading && <span className="text-sm text-muted-foreground">{uploadProgress}</span>}
       </div>
 
-      {/* File list */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-8 text-center text-muted-foreground">Loading...</div>
-          ) : items.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">
-              This folder is empty. Upload files or create a subfolder.
-            </div>
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="hidden sm:table-cell text-right w-[100px]">Size</TableHead>
-                    <TableHead className="hidden md:table-cell text-right w-[180px]">Modified</TableHead>
-                    <TableHead className="text-right w-[120px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedItems.map((item) => (
-                    <TableRow
-                      key={item.path}
-                      className={item.type === 'directory' ? 'cursor-pointer' : ''}
-                      onDoubleClick={() => item.type === 'directory' && navigateTo(item.path)}
-                    >
-                      <TableCell>
-                        <div
-                          className={cn("flex items-center gap-2", item.type === 'directory' && "cursor-pointer")}
-                          onClick={() => item.type === 'directory' && navigateTo(item.path)}
-                        >
-                          {item.type === 'directory'
-                            ? <Folder className="h-4 w-4 text-amber-500 shrink-0" />
-                            : <FileText className={cn("h-4 w-4 shrink-0", EXT_COLORS[item.extension] || "text-muted-foreground")} />
-                          }
-                          <span className={item.type === 'directory' ? 'font-medium' : ''}>{item.name}</span>
-                          {item.extension && (
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{item.extension}</Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell text-right text-sm text-muted-foreground">
-                        {item.type === 'file' ? formatSize(item.size) : '-'}
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell text-right text-sm text-muted-foreground">
-                        {formatDate(item.modified)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex gap-1 justify-end">
-                          {item.type === 'file' && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDownload(item)}>
-                                  <Download className="h-4 w-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Download</TooltipContent>
-                            </Tooltip>
-                          )}
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setRenameItem(item); setRenameName(item.name) }}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Rename</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeleteItem(item)}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Delete</TooltipContent>
-                          </Tooltip>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {/* Pagination footer */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t">
-                <div className="text-sm text-muted-foreground">
-                  {totalItems} item{totalItems !== 1 ? 's' : ''}
-                </div>
-                <div className="flex items-center gap-3 sm:gap-6 flex-wrap justify-center">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</span>
-                    <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1) }}>
-                      <SelectTrigger className="h-8 w-[70px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAGE_SIZES.map(s => (
-                          <SelectItem key={s} value={String(s)}>{s}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <span className="text-sm text-muted-foreground whitespace-nowrap">
-                    Page {page} of {totalPages}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)}>
-                      <ChevronsLeft className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
-                      <ChevronsRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      {loading ? (
+        <div className="p-8 text-center text-muted-foreground">Loading...</div>
+      ) : items.length === 0 ? (
+        <div className="p-8 text-center text-muted-foreground">
+          This folder is empty. Upload files or create a subfolder.
+        </div>
+      ) : (
+        <DataTableCard>
+          <DataTable
+            columns={columns}
+            data={pagedItems}
+            noResultsMessage="No files found"
+          />
+          <DataTablePagination
+            total={totalItems}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizes={PAGE_SIZES}
+            noun="item"
+          />
+        </DataTableCard>
+      )}
 
       {/* Mkdir Dialog */}
       <Dialog open={showMkdir} onOpenChange={setShowMkdir}>

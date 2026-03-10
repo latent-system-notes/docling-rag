@@ -21,7 +21,13 @@ async def get_all_settings():
     result = []
     for key, meta in SETTINGS_REGISTRY.items():
         db_row = db_overrides.get(key)
-        effective_value = str(config(key)) if config(key) is not None else ""
+        raw = config(key)
+        if isinstance(raw, list):
+            effective_value = "|".join(raw)
+        elif raw is not None:
+            effective_value = str(raw)
+        else:
+            effective_value = ""
         result.append({
             "key": key,
             "value": effective_value,

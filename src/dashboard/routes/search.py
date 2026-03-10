@@ -16,8 +16,8 @@ async def search_documents(
     user: dict = Depends(get_current_user),
 ):
     """Search documents filtered by user's groups. Admin sees everything."""
-    groups = None if user.get("is_admin") else user.get("groups") or []
-    result = query_fn(q, top_k, groups=groups or None)
+    groups = None if user.get("is_admin") else (user.get("groups") or [])
+    result = query_fn(q, top_k, groups=groups)
     return {
         "query": result.query,
         "total_results": len(result.context),
@@ -43,6 +43,6 @@ async def list_accessible_documents(
     user: dict = Depends(get_current_user),
 ):
     """List documents the current user can access. Admin sees everything."""
-    groups = None if user.get("is_admin") else user.get("groups") or []
-    docs = list_documents(limit=limit, offset=offset, groups=groups or None)
+    groups = None if user.get("is_admin") else (user.get("groups") or [])
+    docs = list_documents(limit=limit, offset=offset, groups=groups)
     return {"documents": docs, "showing": len(docs), "offset": offset}

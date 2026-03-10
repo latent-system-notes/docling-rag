@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation, Link } from 'react-router-dom'
-import { Users, Shield, FolderTree, LogOut, Search, FileText, Menu, PanelLeftClose, PanelLeftOpen, Settings, Upload, FolderOpen } from 'lucide-react'
+import { Users, Shield, FolderTree, LogOut, Search, FileText, Menu, PanelLeftClose, PanelLeftOpen, Settings, Upload, FolderOpen, Database } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -44,6 +44,7 @@ export default function Layout() {
   const mainNav = [
     { to: '/search', icon: Search, label: 'Search' },
     { to: '/documents', icon: FileText, label: 'Documents' },
+    { to: '/chunks', icon: Database, label: 'Chunks' },
   ]
   const adminNav = [
     { to: '/users', icon: Users, label: 'Users' },
@@ -234,12 +235,12 @@ export default function Layout() {
       {/* Main content */}
       <main
         className={cn(
-          'flex-1 bg-muted/40 sidebar-transition min-h-screen overflow-x-hidden',
+          'flex-1 bg-muted/40 sidebar-transition h-screen overflow-hidden',
           !isMobile ? (expanded ? 'ml-60' : 'ml-12') : 'ml-0',
           isMobile ? 'pt-14' : ''
         )}
       >
-        <div className="p-3 md:p-6">
+        <div className="flex flex-col h-full p-3 md:p-6 overflow-y-auto">
           <Outlet />
         </div>
       </main>
