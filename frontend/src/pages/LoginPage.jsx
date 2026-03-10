@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,7 +12,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [appName, setAppName] = useState('Dashboard')
   const navigate = useNavigate()
+
+  useEffect(() => {
+    api.getAppInfo().then(info => setAppName(info.name || 'Dashboard'))
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -38,7 +43,7 @@ export default function LoginPage() {
     <div className="flex items-center justify-center min-h-screen bg-muted/40">
       <Card className="w-[380px]">
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">Docling RAG Dashboard</CardTitle>
+          <CardTitle className="text-xl">{appName}</CardTitle>
         </CardHeader>
         <CardContent>
           {error && (

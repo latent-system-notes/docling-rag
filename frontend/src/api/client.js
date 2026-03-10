@@ -29,6 +29,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // App info (public, no auth needed)
+  getAppInfo: () => fetch(`${BASE}/info`).then(r => r.ok ? r.json() : { name: 'Docling RAG' }),
+
   // Auth
   login: (username, password) =>
     request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, createContext, useContext } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation, Link } from 'react-router-dom'
+import { api } from '../api/client'
 import { Users, Shield, FolderTree, LogOut, Search, FileText, Menu, PanelLeftClose, PanelLeftOpen, Settings, Upload, FolderOpen, Database } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +20,11 @@ export default function Layout() {
   const [expanded, setExpanded] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [appName, setAppName] = useState('Docling RAG')
+
+  useEffect(() => {
+    api.getAppInfo().then(info => setAppName(info.name || 'Docling RAG'))
+  }, [])
 
   useEffect(() => {
     const check = () => {
@@ -187,7 +193,7 @@ export default function Layout() {
           )}
           <SheetContent side="left" className="w-60 p-0 flex flex-col">
             <div className="flex h-14 items-center px-4 border-b">
-              <span className="text-lg font-semibold tracking-tight">Docling RAG</span>
+              <span className="text-lg font-semibold tracking-tight">{appName}</span>
             </div>
             {expandedContent}
           </SheetContent>
@@ -206,7 +212,7 @@ export default function Layout() {
             <>
               {/* Expanded header */}
               <div className="flex h-14 items-center justify-between px-4 border-b">
-                <span className="text-lg font-semibold tracking-tight">Docling RAG</span>
+                <span className="text-lg font-semibold tracking-tight">{appName}</span>
                 <Button variant="ghost" size="icon" onClick={() => setExpanded(false)} className="h-8 w-8">
                   <PanelLeftClose className="h-4 w-4" />
                 </Button>

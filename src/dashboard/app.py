@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..config import config
 from .routes import auth, users, groups, permissions, search, settings, ingestion, files, browse, chunks
 
 # React build output directory (frontend/dist after `npm run build`)
@@ -21,6 +22,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.get("/api/info")
+    async def app_info():
+        return {"name": config("MCP_SERVER_NAME")}
 
     # API routes — all under /api
     app.include_router(auth.router)
