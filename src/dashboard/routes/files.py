@@ -222,3 +222,44 @@ async def download_file(path: str = Query(..., description="Relative path to fil
         filename=target.name,
         media_type="application/octet-stream",
     )
+
+
+# ---------------------------------------------------------------------------
+# Preview file (inline)
+# ---------------------------------------------------------------------------
+
+MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".md": "text/markdown",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+}
+
+
+@router.get("/preview")
+async def preview_file(path: str = Query(..., description="Relative path to file")):
+    target = _safe_resolve(path)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail="Path is not a file")
+
+    ext = target.suffix.lower()
+    media_type = MIME_TYPES.get(ext, "application/octet-stream")
+
+    return FileResponse(
+        path=str(target),
+        filename=target.name,
+        media_type=media_type,
+        content_disposition_type="inline",
+    )
