@@ -295,6 +295,28 @@ def list_documents(limit: int | None = None, offset: int = 0, groups: list[str] 
         raise StorageError(f"Failed to list documents: {e}") from e
 
 
+def count_documents(groups: list[str] | None = None) -> int:
+    try:
+        where_clauses, params = [], []
+        if groups is not None:
+            where_clauses.append(
+                "(c.doc_id NOT IN (SELECT DISTINCT dp.doc_id FROM document_permissions dp) "
+                "OR c.doc_id IN (SELECT dp.doc_id FROM document_permissions dp "
+                "JOIN groups g ON g.id = dp.group_id WHERE g.name = ANY(%s)))"
+            )
+            params.append(groups)
+        where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        with get_pool().connection() as conn:
+            return conn.execute(
+                f"SELECT COUNT(*) FROM (SELECT DISTINCT c.doc_id FROM chunks c {where}) sub",
+                params,
+            ).fetchone()[0]
+    except StorageError:
+        raise
+    except Exception as e:
+        raise StorageError(f"Failed to count documents: {e}") from e
+
+
 def remove_document_by_id(doc_id_or_partial: str) -> int:
     try:
         with get_pool().connection() as conn:

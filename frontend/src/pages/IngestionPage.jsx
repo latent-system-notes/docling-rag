@@ -35,6 +35,7 @@ export default function IngestionPage() {
   const [folders, setFolders] = useState('')
   const [force, setForce] = useState(false)
   const [workers, setWorkers] = useState(3)
+  const [ocrMode, setOcrMode] = useState('smart')
   const [showOptions, setShowOptions] = useState(false)
 
   const logsEndRef = useRef(null)
@@ -88,7 +89,7 @@ export default function IngestionPage() {
     setLogs([])
     setLogOffset(0)
     try {
-      const opts = { workers }
+      const opts = { workers, ocr_mode: ocrMode }
       if (folders.trim()) opts.folders = folders.trim()
       if (force) opts.force = true
       await api.startIngestion(opts)
@@ -173,6 +174,28 @@ export default function IngestionPage() {
                 <Switch checked={force} onCheckedChange={setForce} disabled={isRunning} />
                 <Label className="text-sm cursor-pointer">Force re-ingest</Label>
               </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold">OCR Mode</Label>
+                <div className="flex rounded-md border overflow-hidden">
+                  {[['smart', 'Smart OCR'], ['simple', 'Simple OCR']].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={isRunning}
+                      onClick={() => setOcrMode(value)}
+                      className={cn(
+                        'px-3 py-1.5 text-xs font-medium transition-colors',
+                        ocrMode === value
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-accent',
+                        isRunning && 'opacity-50 cursor-not-allowed'
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </CardContent>
@@ -205,6 +228,19 @@ export default function IngestionPage() {
                 All files will be re-processed even if already ingested.
               </div>
             )}
+            <div className={cn(
+              "rounded-md border px-3 py-2 text-sm",
+              status.ocr_mode === 'simple'
+                ? "border-gray-500/30 bg-gray-500/5"
+                : "border-violet-500/30 bg-violet-500/5"
+            )}>
+              <span className={cn("font-medium", status.ocr_mode === 'simple' ? "text-gray-600" : "text-violet-600")}>
+                {status.ocr_mode === 'simple' ? 'Simple OCR:' : 'Smart OCR:'}
+              </span>{' '}
+              {status.ocr_mode === 'simple'
+                ? 'Fast mode — no OCR probe, image description, or image classification.'
+                : 'Full mode — OCR probe per PDF, image description & classification enabled.'}
+            </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <Stat label="Total files" value={status.total_files} />

@@ -113,7 +113,7 @@ CUSTOM_PROMPT = (
 def tidy(s: str) -> str:
     return re.sub(r'\s+', ' ', re.sub(r'[\r\n]+|<!-- image -->', ' ', s)).strip()
 
-def _convert_via_api(source: str | Path) -> DoclingDocument:
+def _convert_via_api(source: str | Path, ocr_mode: str = "smart") -> DoclingDocument:
     base_url = config("DOCLING_SERVE_URL").rstrip("/")
     api_key = config("DOCLING_SERVE_API_KEY")
     headers = {"X-API-Key": api_key} if api_key else {}
@@ -125,25 +125,29 @@ def _convert_via_api(source: str | Path) -> DoclingDocument:
         """Create a fresh file-like object for each HTTP request."""
         return {"files": (source_path.name, io.BytesIO(file_bytes), mime)}
 
+    is_simple = ocr_mode == "simple"
+
     options = {
-            "do_picture_description": True,
-            "do_picture_classification": True,
+            "do_picture_description": not is_simple,
+            "do_picture_classification": not is_simple,
             "pdf_backend": "dlparse_v4",
             "do_ocr": True,
             "force_ocr": False,
             "bitmap_area_treshold": 0.75,
             "to_formats": ["json"],
-            "image_export_mode": "embedded",
-        "picture_description_local": json.dumps({
-                "repo_id": "HuggingFaceTB/SmolVLM-256M-Instruct",
-                "prompt": CUSTOM_PROMPT
-        }),
+            "image_export_mode": "embedded" if not is_simple else "placeholder",
             "ocr_engine": "auto"
     }
 
-    logger.info(f"Converting: {source_path.absolute()}")
+    if not is_simple:
+        options["picture_description_local"] = json.dumps({
+                "repo_id": "HuggingFaceTB/SmolVLM-256M-Instruct",
+                "prompt": CUSTOM_PROMPT
+        })
 
-    if Path(source).suffix.lower() == ".pdf":
+    logger.info(f"Converting: {source_path.absolute()} (ocr_mode={ocr_mode})")
+
+    if not is_simple and Path(source).suffix.lower() == ".pdf":
         logger.info("PDF detected, running OCR probe on first 2 pages...")
         probe_opts = copy.deepcopy(options)
         probe_opts.update({
@@ -184,11 +188,11 @@ def _convert_via_api(source: str | Path) -> DoclingDocument:
     return DoclingDocument.model_validate(content["json_content"])
 
 
-def load_document(source: str | Path) -> tuple[DoclingDocument, int | None]:
+def load_document(source: str | Path, ocr_mode: str = "smart") -> tuple[DoclingDocument, int | None]:
     try:
         page_count = _get_page_count(source)
-        logger.info(f"Converting via docling-serve")
-        return _convert_via_api(source), page_count
+        logger.info(f"Converting via docling-serve (ocr_mode={ocr_mode})")
+        return _convert_via_api(source, ocr_mode=ocr_mode), page_count
     except DocumentLoadError:
         raise
     except httpx.HTTPStatusError as e:

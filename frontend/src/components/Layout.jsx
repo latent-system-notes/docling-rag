@@ -26,6 +26,13 @@ export default function Layout() {
     api.getAppInfo().then(info => setAppName(info.name || 'Docling RAG'))
   }, [])
 
+  // Update document title based on current page
+  useEffect(() => {
+    const segment = location.pathname.split('/').filter(Boolean)[0] || 'search'
+    const pageTitle = segment.charAt(0).toUpperCase() + segment.slice(1)
+    document.title = `${appName} : ${pageTitle}`
+  }, [location.pathname, appName])
+
   useEffect(() => {
     const check = () => {
       const mobile = window.innerWidth <= 768

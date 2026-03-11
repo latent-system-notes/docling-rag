@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Query
 
 from ...query import query as query_fn
-from ...storage.postgres import list_documents
+from ...storage.postgres import list_documents, count_documents
 from ..deps import get_current_user
 
 router = APIRouter(prefix="/api/search", tags=["search"])
@@ -38,11 +38,13 @@ async def search_documents(
 
 @router.get("/documents")
 async def list_accessible_documents(
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=500),
     user: dict = Depends(get_current_user),
 ):
     """List documents the current user can access. Admin sees everything."""
     groups = None if user.get("is_admin") else (user.get("groups") or [])
-    docs = list_documents(limit=limit, offset=offset, groups=groups)
-    return {"documents": docs, "showing": len(docs), "offset": offset}
+    offset = (page - 1) * page_size
+    docs = list_documents(limit=page_size, offset=offset, groups=groups)
+    total = count_documents(groups=groups)
+    return {"items": docs, "total": total, "page": page, "page_size": page_size}

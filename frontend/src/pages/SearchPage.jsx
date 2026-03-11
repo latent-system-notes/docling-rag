@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import Markdown from 'react-markdown'
 
 export default function SearchPage() {
   const [query, setQuery] = useState('')
@@ -92,8 +93,8 @@ export default function SearchPage() {
                   {r.doc_type && <Badge variant="success">{r.doc_type}</Badge>}
                   <span className="text-sm text-muted-foreground ml-auto">Score: {r.score}</span>
                 </div>
-                <div className="text-sm leading-relaxed whitespace-pre-wrap bg-muted rounded-md p-3 overflow-x-auto">
-                  {r.text}
+                <div className="text-sm leading-relaxed bg-muted rounded-md p-3 overflow-x-auto prose prose-sm dark:prose-invert max-w-none">
+                  <Markdown>{r.text}</Markdown>
                 </div>
               </CardContent>
             </Card>

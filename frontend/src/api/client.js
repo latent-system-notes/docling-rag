@@ -76,7 +76,8 @@ export const api = {
 
   // Search (user-facing, auto-filtered by groups)
   search: (q, topK = 10) => request(`/search?q=${encodeURIComponent(q)}&top_k=${topK}`),
-  myDocuments: (limit = 50, offset = 0) => request(`/search/documents?limit=${limit}&offset=${offset}`),
+  myDocuments: (page = 1, pageSize = 25) =>
+    request(`/search/documents?page=${page}&page_size=${pageSize}`),
 
   // Settings
   getSettings: () => request('/settings'),

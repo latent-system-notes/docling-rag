@@ -13,7 +13,9 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.table import Table
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import itertools
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 import threading
 
 app = typer.Typer()
@@ -181,17 +183,32 @@ def ingest(
     # inside the ``managed_resources`` context manager. Wrapping the parallel
     # ingestion loop ensures they are released even when we run multiple threads.
     with managed_resources():
-        # Parallel execution using ThreadPoolExecutor
+        # Sliding window: submit at most batch_size futures at a time
         with console.status(""), ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(_process_file, f): f for f in files}
-            for future in as_completed(futures):
-                proc, skip, fail = future.result()
-                if proc:
-                    processed += 1
-                if skip:
-                    skipped += 1
-                if fail:
-                    failed += 1
+            batch_size = workers * 2
+            active = {}
+
+            # Seed initial batch
+            for f in itertools.islice(files, batch_size):
+                active[executor.submit(_process_file, f)] = f
+
+            while active:
+                done, _ = concurrent.futures.wait(
+                    active, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                for future in done:
+                    del active[future]
+                    proc, skip, fail = future.result()
+                    if proc:
+                        processed += 1
+                    if skip:
+                        skipped += 1
+                    if fail:
+                        failed += 1
+
+                # Refill from generator
+                for f in itertools.islice(files, len(done)):
+                    active[executor.submit(_process_file, f)] = f
 
         console.print("[cyan]ThreadPoolExecutor completed ...[/cyan]")
 

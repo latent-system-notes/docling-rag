@@ -1,29 +1,30 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../api/client'
-import { FileText, ChevronLeft, ChevronRight } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { FileText } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { DataTable, DataTableCard, SortableHeader } from '@/components/ui/data-table'
+import { DataTable, DataTablePagination, DataTableCard, SortableHeader } from '@/components/ui/data-table'
+
+const PAGE_SIZES = [10, 25, 50, 100]
 
 export default function DocumentsPage() {
   const [docs, setDocs] = useState([])
-  const [offset, setOffset] = useState(0)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [loading, setLoading] = useState(true)
-  const limit = 25
 
-  const load = async (newOffset = 0) => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.myDocuments(limit, newOffset)
-      setDocs(data.documents)
-      setOffset(newOffset)
+      const data = await api.myDocuments(page, pageSize)
+      setDocs(data.items)
+      setTotal(data.total)
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, pageSize])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const fileName = (path) => {
     const parts = path.replace(/\\/g, '/').split('/')
@@ -108,17 +109,15 @@ export default function DocumentsPage() {
             data={docs}
             noResultsMessage="No documents found"
           />
-          <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
-            <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => load(Math.max(0, offset - limit))}>
-              <ChevronLeft className="h-4 w-4" /> Previous
-            </Button>
-            <span className="text-sm text-muted-foreground">
-              Showing {offset + 1}&ndash;{offset + docs.length}
-            </span>
-            <Button variant="outline" size="sm" disabled={docs.length < limit} onClick={() => load(offset + limit)}>
-              Next <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
+          <DataTablePagination
+            total={total}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizes={PAGE_SIZES}
+            noun="document"
+          />
         </DataTableCard>
       )}
     </div>

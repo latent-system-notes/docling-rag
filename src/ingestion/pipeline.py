@@ -10,7 +10,7 @@ from ..storage.postgres import add_vectors, compute_effective_groups, set_docume
 logger = get_logger(__name__)
 
 
-def ingest_document(file_path: str | Path) -> DocumentMetadata:
+def ingest_document(file_path: str | Path, ocr_mode: str = "smart") -> DocumentMetadata:
     file_path = Path(file_path)
     if not file_path.exists():
         raise IngestionError(f"File not found: {file_path}")
@@ -18,7 +18,7 @@ def ingest_document(file_path: str | Path) -> DocumentMetadata:
     normalized_path = display_path(file_path)
     doc_id = make_doc_id(file_path)
 
-    doc, page_count = load_document(file_path)
+    doc, page_count = load_document(file_path, ocr_mode=ocr_mode)
     chunks = chunk_document(doc, doc_id=normalized_path)
     if not chunks:
         del doc

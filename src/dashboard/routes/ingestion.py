@@ -1,7 +1,9 @@
 import os
+import itertools
 import threading
 import time
 import logging
+import concurrent.futures
 from datetime import datetime
 from pathlib import Path
 
@@ -22,7 +24,7 @@ _job_lock = threading.Lock()
 _current_job: dict | None = None
 
 
-def _empty_job(started_by: str, folders: str | None, force: bool, workers: int) -> dict:
+def _empty_job(started_by: str, folders: str | None, force: bool, workers: int, ocr_mode: str = "smart") -> dict:
     return {
         "id": datetime.now().strftime("%Y%m%d%H%M%S"),
         "status": "running",         # running | completed | failed | cancelled
@@ -32,6 +34,7 @@ def _empty_job(started_by: str, folders: str | None, force: bool, workers: int) 
         "folders": folders,
         "force": force,
         "workers": workers,
+        "ocr_mode": ocr_mode,
         "total_files": 0,
         "processed": 0,
         "skipped": 0,
@@ -107,13 +110,13 @@ def _run_ingestion(job: dict):
             job["finished_at"] = datetime.now().isoformat()
             return
 
-        # Discover files first to get a total count
+        # Phase 1: Count files without storing paths (keeps memory flat)
         _add_log(job, "INFO", f"Scanning {doc_path} ...")
-        files = list(discover_files(Path(doc_path), recursive=True, include_folders=include_folders))
-        job["total_files"] = len(files)
-        _add_log(job, "INFO", f"Found {len(files)} file(s) to process")
+        total = sum(1 for _ in discover_files(Path(doc_path), recursive=True, include_folders=include_folders))
+        job["total_files"] = total
+        _add_log(job, "INFO", f"Found {total} file(s) to process")
 
-        if not files:
+        if total == 0:
             job["status"] = "completed"
             job["finished_at"] = datetime.now().isoformat()
             return
@@ -133,29 +136,47 @@ def _run_ingestion(job: dict):
                         return False, True, False
 
             try:
-                meta = ingest_document(f)
+                meta = ingest_document(f, ocr_mode=job["ocr_mode"])
                 _add_log(job, "INFO", f"[OK] {f.name} ({meta.num_chunks} chunks)")
                 return True, False, False
             except Exception as e:
                 _add_log(job, "ERROR", f"[FAILED] {f.name} — {e}")
                 return False, False, True
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor
 
+        # Phase 2: Sliding window — submit at most batch_size futures at a time
         with managed_resources():
             with ThreadPoolExecutor(max_workers=job["workers"]) as executor:
-                futures = {executor.submit(_process_file, f): f for f in files}
-                for future in as_completed(futures):
+                batch_size = job["workers"] * 2
+                file_gen = discover_files(Path(doc_path), recursive=True, include_folders=include_folders)
+                active = {}
+
+                # Seed initial batch
+                for f in itertools.islice(file_gen, batch_size):
+                    active[executor.submit(_process_file, f)] = f
+
+                while active:
                     if job["cancel_flag"].is_set():
                         executor.shutdown(wait=False, cancel_futures=True)
                         break
-                    proc, skip, fail = future.result()
-                    if proc:
-                        job["processed"] += 1
-                    if skip:
-                        job["skipped"] += 1
-                    if fail:
-                        job["failed"] += 1
+
+                    done, _ = concurrent.futures.wait(
+                        active, return_when=concurrent.futures.FIRST_COMPLETED
+                    )
+                    for future in done:
+                        del active[future]
+                        proc, skip, fail = future.result()
+                        if proc:
+                            job["processed"] += 1
+                        if skip:
+                            job["skipped"] += 1
+                        if fail:
+                            job["failed"] += 1
+
+                    # Refill from generator
+                    for f in itertools.islice(file_gen, len(done)):
+                        active[executor.submit(_process_file, f)] = f
 
         if job["cancel_flag"].is_set():
             job["status"] = "cancelled"
@@ -183,6 +204,7 @@ class StartRequest(BaseModel):
     folders: str | None = None
     force: bool = False
     workers: int = 3
+    ocr_mode: str = "smart"  # "smart" or "simple"
 
 
 @router.post("/start")
@@ -198,6 +220,7 @@ async def start_ingestion(body: StartRequest, user: dict = Depends(require_admin
             folders=body.folders,
             force=body.force,
             workers=body.workers,
+            ocr_mode=body.ocr_mode,
         )
         _current_job = job
 
@@ -223,6 +246,7 @@ async def get_status():
         "folders": job.get("folders") or None,
         "folders_resolved": job.get("folders_resolved") or None,
         "force": job.get("force", False),
+        "ocr_mode": job.get("ocr_mode", "smart"),
         "total_files": job["total_files"],
         "processed": job["processed"],
         "skipped": job["skipped"],
