@@ -483,6 +483,119 @@ def fix_paths_cmd(env: str):
     console.print(f"[green]Done! {doc_perms} document permission entries computed")
 
 
+@app.command("migrate-paths")
+def migrate_paths_cmd(
+    env: str,
+    old_prefix: str = typer.Option(..., help="Old path prefix to replace (e.g. 'Z:/')"),
+    new_prefix: str = typer.Option(..., help="New path prefix (e.g. '//SERVER/share$/')"),
+    yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt"),
+):
+    """Replace an old path prefix with a new one in chunks + path_permissions, recompute doc_id and document_permissions."""
+    _load_env(env)
+    from src.storage.postgres import create_collection, get_pool
+    create_collection()
+
+    with get_pool().connection() as conn:
+        # 1. Preview — count affected rows
+        cur = conn.execute("SELECT COUNT(*) FROM chunks WHERE file_path LIKE %s", (old_prefix + '%',))
+        chunks_count = cur.fetchone()[0]
+        cur = conn.execute("SELECT COUNT(*) FROM path_permissions WHERE path LIKE %s", (old_prefix + '%',))
+        perms_count = cur.fetchone()[0]
+
+        console.print(f"[bold]Migration preview:[/bold]")
+        console.print(f"  Old prefix: {old_prefix}")
+        console.print(f"  New prefix: {new_prefix}")
+        console.print(f"  Chunks affected:          {chunks_count}")
+        console.print(f"  Path permissions affected: {perms_count}")
+
+        if chunks_count == 0 and perms_count == 0:
+            console.print("[yellow]No rows match the old prefix — nothing to do.")
+            return
+
+        if not yes and not typer.confirm("Proceed with migration?"):
+            console.print("[yellow]Aborted.")
+            return
+
+        # 2. Update file_path in chunks
+        cur = conn.execute(
+            "UPDATE chunks SET file_path = %s || SUBSTRING(file_path FROM %s) WHERE file_path LIKE %s",
+            (new_prefix, len(old_prefix) + 1, old_prefix + '%'),
+        )
+        console.print(f"  Updated {cur.rowcount} chunk file_paths")
+
+        # 3. Update path in path_permissions
+        cur = conn.execute(
+            "UPDATE path_permissions SET path = %s || SUBSTRING(path FROM %s) WHERE path LIKE %s",
+            (new_prefix, len(old_prefix) + 1, old_prefix + '%'),
+        )
+        console.print(f"  Updated {cur.rowcount} permission paths")
+
+        # 4. Recompute doc_id = md5(file_path)
+        #    Some new doc_ids may already exist (file was ingested via both old & new paths).
+        #    For those conflicts: delete the OLD duplicate chunks/perms (new-path version wins).
+        conn.execute("""
+            CREATE TEMP TABLE doc_id_map AS
+            SELECT DISTINCT doc_id AS old_doc_id, md5(file_path) AS new_doc_id
+            FROM chunks WHERE doc_id != md5(file_path)
+        """)
+        cur = conn.execute("SELECT COUNT(*) FROM doc_id_map")
+        docs_to_fix = cur.fetchone()[0]
+        if docs_to_fix > 0:
+            # Find conflicts: old_doc_id needs to become new_doc_id, but new_doc_id already exists
+            cur = conn.execute("""
+                SELECT COUNT(*) FROM doc_id_map m
+                WHERE m.new_doc_id IN (SELECT DISTINCT doc_id FROM chunks WHERE doc_id != m.old_doc_id)
+            """)
+            conflicts = cur.fetchone()[0]
+            if conflicts > 0:
+                # Delete old duplicate chunks & perms where new doc_id already exists
+                conn.execute("""
+                    DELETE FROM document_permissions dp
+                    USING doc_id_map m
+                    WHERE dp.doc_id = m.old_doc_id
+                      AND m.new_doc_id IN (SELECT DISTINCT doc_id FROM chunks WHERE doc_id != m.old_doc_id)
+                """)
+                conn.execute("""
+                    DELETE FROM chunks c
+                    USING doc_id_map m
+                    WHERE c.doc_id = m.old_doc_id
+                      AND m.new_doc_id IN (SELECT DISTINCT doc_id FROM chunks WHERE doc_id != m.old_doc_id)
+                """)
+                # Remove resolved conflicts from the map
+                conn.execute("""
+                    DELETE FROM doc_id_map m
+                    WHERE m.new_doc_id IN (SELECT DISTINCT doc_id FROM chunks WHERE doc_id != m.old_doc_id)
+                """)
+                console.print(f"  Skipped {conflicts} documents (already exist with new path, removed old duplicates)")
+
+            # Update remaining non-conflicting doc_ids
+            cur = conn.execute("SELECT COUNT(*) FROM doc_id_map")
+            remaining = cur.fetchone()[0]
+            if remaining > 0:
+                conn.execute("UPDATE chunks c SET doc_id = m.new_doc_id FROM doc_id_map m WHERE c.doc_id = m.old_doc_id")
+                conn.execute("UPDATE document_permissions dp SET doc_id = m.new_doc_id FROM doc_id_map m WHERE dp.doc_id = m.old_doc_id")
+                console.print(f"  Recomputed doc_id for {remaining} documents")
+        else:
+            console.print(f"  All doc_ids already consistent")
+        conn.execute("DROP TABLE doc_id_map")
+
+        # 5. Rebuild document_permissions from scratch
+        conn.execute("TRUNCATE document_permissions")
+        cur = conn.execute("""
+            INSERT INTO document_permissions (doc_id, group_id)
+            SELECT DISTINCT c.doc_id, pp.group_id
+            FROM (SELECT DISTINCT doc_id, file_path FROM chunks) c
+            JOIN path_permissions pp
+              ON c.file_path = pp.path
+              OR c.file_path LIKE pp.path || '/%'
+            ON CONFLICT (doc_id, group_id) DO NOTHING
+        """)
+        doc_perms = cur.rowcount
+        conn.commit()
+
+    console.print(f"[green]Done! Migrated {chunks_count} chunks, {perms_count} permission paths. {doc_perms} document permission entries computed.")
+
+
 @app.command("refresh-permissions")
 def refresh_permissions_cmd(env: str):
     _load_env(env)
