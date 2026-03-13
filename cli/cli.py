@@ -266,8 +266,11 @@ def reset(env: str):
 def serve(env: str):
     _load_env(env)
     from src.config import config, MCP_HOST
-    from src.storage.postgres import create_collection
-    create_collection()
+    try:
+        from src.storage.postgres import create_collection
+        create_collection()
+    except Exception as e:
+        console.print(f"[yellow]Warning: Database not available ({e}). Server will start without DB.[/yellow]")
     from src.mcp.server import run_server
     port = config("MCP_PORT")
     console.print(f"[green]Starting server ({config('MCP_SERVER_NAME')}) on http://{MCP_HOST}:{port}")

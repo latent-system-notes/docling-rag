@@ -57,12 +57,14 @@ def get_pool() -> ConnectionPool:
             conninfo = (
                 f"host={config('POSTGRES_HOST')} port={config('POSTGRES_PORT')} "
                 f"dbname={config('POSTGRES_DB')} user={config('POSTGRES_USER')} "
-                f"password={config('POSTGRES_PASSWORD')}"
+                f"password={config('POSTGRES_PASSWORD')} "
+                f"connect_timeout=5"
             )
             pool = ConnectionPool(
                 conninfo=conninfo,
                 min_size=config("POSTGRES_POOL_MIN"),
                 max_size=config("POSTGRES_POOL_MAX"),
+                timeout=10,
                 configure=lambda conn: register_vector(conn),
                 check=ConnectionPool.check_connection,
             )

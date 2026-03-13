@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -12,8 +13,24 @@ from .routes import auth, users, groups, permissions, search, settings, ingestio
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="Docling RAG Dashboard", version="1.0.0")
+def create_app(mcp_app=None) -> FastAPI:
+    # Wire MCP sub-app lifespan into the parent app so its session manager starts
+    @asynccontextmanager
+    async def lifespan(app):
+        if mcp_app is not None and hasattr(mcp_app, 'lifespan'):
+            async with mcp_app.lifespan(app):
+                yield
+        else:
+            yield
+
+    app = FastAPI(title="Docling RAG Dashboard", version="1.0.0", lifespan=lifespan)
+
+    # Middleware to rewrite /mcp -> /mcp/ so the mount matches
+    @app.middleware("http")
+    async def mcp_trailing_slash(request: Request, call_next):
+        if request.url.path == "/mcp":
+            request.scope["path"] = "/mcp/"
+        return await call_next(request)
 
     app.add_middleware(
         CORSMiddleware,
@@ -38,6 +55,10 @@ def create_app() -> FastAPI:
     app.include_router(files.router)
     app.include_router(browse.router)
     app.include_router(chunks.router)
+
+    # Mount MCP sub-application BEFORE the SPA catch-all so it gets matched first
+    if mcp_app is not None:
+        app.mount("/mcp", mcp_app)
 
     # Serve React static build if available
     if FRONTEND_DIR.is_dir():

@@ -31,6 +31,12 @@ def _create_mcp():
     return mcp
 
 
+def _create_mcp_asgi():
+    """Create the MCP ASGI sub-application."""
+    mcp = _create_mcp()
+    return mcp.http_app(path="/", transport="streamable-http")
+
+
 def create_combined_app():
     """Create a single FastAPI app that serves:
     - /mcp       → MCP streamable-http endpoint
@@ -48,12 +54,10 @@ def create_combined_app():
     except Exception as e:
         logger.warning(f"Could not initialize settings: {e}")
 
-    app = create_app()
-
-    # Mount MCP as a sub-application at /mcp
-    mcp = _create_mcp()
-    mcp_asgi = mcp.http_app(path="/mcp", transport="streamable-http")
-    app.mount("/mcp", mcp_asgi)
+    # Create MCP ASGI app and pass it to create_app so it's mounted
+    # BEFORE the SPA catch-all route (route order matters in Starlette)
+    mcp_asgi = _create_mcp_asgi()
+    app = create_app(mcp_app=mcp_asgi)
 
     return app
 
@@ -64,9 +68,13 @@ def reload_mcp(app):
 
     load_settings_from_db()
     app.routes[:] = [r for r in app.routes if not (hasattr(r, 'path') and r.path == '/mcp')]
-    mcp = _create_mcp()
-    mcp_asgi = mcp.http_app(path="/mcp", transport="streamable-http")
+
+    # Re-create and re-mount MCP; insert before the SPA catch-all (last route)
+    mcp_asgi = _create_mcp_asgi()
     app.mount("/mcp", mcp_asgi)
+    mcp_route = app.routes.pop()
+    # Insert before the last route (SPA catch-all)
+    app.routes.insert(-1, mcp_route)
     logger.info("MCP instance reloaded with updated settings")
 
 
