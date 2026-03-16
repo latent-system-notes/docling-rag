@@ -24,6 +24,9 @@ _job_lock = threading.Lock()
 _current_job: dict | None = None
 
 
+MAX_JOB_LOGS = 5000  # cap in-memory log entries to avoid unbounded growth
+
+
 def _empty_job(started_by: str, folders: str | None, force: bool, workers: int, ocr_mode: str = "smart") -> dict:
     return {
         "id": datetime.now().strftime("%Y%m%d%H%M%S"),
@@ -35,17 +38,22 @@ def _empty_job(started_by: str, folders: str | None, force: bool, workers: int, 
         "force": force,
         "workers": workers,
         "ocr_mode": ocr_mode,
-        "total_files": 0,
+        "total_files": 0,            # incremented as files are discovered (streaming)
+        "scan_complete": False,       # True once the file generator is exhausted
         "processed": 0,
         "skipped": 0,
         "failed": 0,
         "current_file": None,
         "logs": [],                   # list of {"ts": ..., "level": ..., "msg": ...}
+        "logs_dropped": 0,           # count of log entries dropped due to cap
         "cancel_flag": threading.Event(),
     }
 
 
 def _add_log(job: dict, level: str, msg: str):
+    if len(job["logs"]) >= MAX_JOB_LOGS:
+        job["logs_dropped"] += 1
+        return
     job["logs"].append({
         "ts": datetime.now().isoformat(timespec="seconds"),
         "level": level,
@@ -110,16 +118,7 @@ def _run_ingestion(job: dict):
             job["finished_at"] = datetime.now().isoformat()
             return
 
-        # Phase 1: Count files without storing paths (keeps memory flat)
-        _add_log(job, "INFO", f"Scanning {doc_path} ...")
-        total = sum(1 for _ in discover_files(Path(doc_path), recursive=True, include_folders=include_folders))
-        job["total_files"] = total
-        _add_log(job, "INFO", f"Found {total} file(s) to process")
-
-        if total == 0:
-            job["status"] = "completed"
-            job["finished_at"] = datetime.now().isoformat()
-            return
+        _add_log(job, "INFO", f"Discovering and ingesting files from {doc_path} ...")
 
         lock = threading.Lock()
 
@@ -145,16 +144,27 @@ def _run_ingestion(job: dict):
 
         from concurrent.futures import ThreadPoolExecutor
 
-        # Phase 2: Sliding window — submit at most batch_size futures at a time
+        # Single-pass streaming: discover and ingest in one pass, no upfront count
         with managed_resources():
             with ThreadPoolExecutor(max_workers=job["workers"]) as executor:
                 batch_size = job["workers"] * 2
                 file_gen = discover_files(Path(doc_path), recursive=True, include_folders=include_folders)
                 active = {}
+                gen_exhausted = False
+
+                def _submit_from_gen(count):
+                    """Pull up to `count` files from generator and submit them."""
+                    nonlocal gen_exhausted
+                    submitted = 0
+                    for f in itertools.islice(file_gen, count):
+                        job["total_files"] += 1
+                        active[executor.submit(_process_file, f)] = f
+                        submitted += 1
+                    if submitted < count:
+                        gen_exhausted = True
 
                 # Seed initial batch
-                for f in itertools.islice(file_gen, batch_size):
-                    active[executor.submit(_process_file, f)] = f
+                _submit_from_gen(batch_size)
 
                 while active:
                     if job["cancel_flag"].is_set():
@@ -175,8 +185,13 @@ def _run_ingestion(job: dict):
                             job["failed"] += 1
 
                     # Refill from generator
-                    for f in itertools.islice(file_gen, len(done)):
-                        active[executor.submit(_process_file, f)] = f
+                    if not gen_exhausted:
+                        _submit_from_gen(len(done))
+
+                job["scan_complete"] = True
+
+        if job["total_files"] == 0:
+            _add_log(job, "INFO", "No files found to process")
 
         if job["cancel_flag"].is_set():
             job["status"] = "cancelled"
@@ -248,6 +263,7 @@ async def get_status():
         "force": job.get("force", False),
         "ocr_mode": job.get("ocr_mode", "smart"),
         "total_files": job["total_files"],
+        "scan_complete": job.get("scan_complete", False),
         "processed": job["processed"],
         "skipped": job["skipped"],
         "failed": job["failed"],
@@ -264,6 +280,7 @@ async def get_logs(offset: int = Query(0, ge=0)):
     return {
         "logs": logs[offset:],
         "total": len(logs),
+        "dropped": _current_job.get("logs_dropped", 0),
     }
 
 

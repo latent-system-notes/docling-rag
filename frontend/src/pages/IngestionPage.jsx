@@ -116,9 +116,10 @@ export default function IngestionPage() {
   }
 
   const isRunning = status?.active === true
-  const progress = status?.total_files > 0
-    ? Math.round(((status.processed + status.skipped + status.failed) / status.total_files) * 100)
-    : 0
+  const handled = (status?.processed ?? 0) + (status?.skipped ?? 0) + (status?.failed ?? 0)
+  const progress = status?.scan_complete && status?.total_files > 0
+    ? Math.round((handled / status.total_files) * 100)
+    : (status?.total_files > 0 ? Math.min(Math.round((handled / status.total_files) * 100), 99) : 0)
 
   return (
     <div className="space-y-6">
@@ -243,7 +244,7 @@ export default function IngestionPage() {
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Stat label="Total files" value={status.total_files} />
+              <Stat label={status.scan_complete ? "Total files" : "Discovered"} value={status.scan_complete ? status.total_files : `${status.total_files}...`} />
               <Stat label="Processed" value={status.processed} className="text-emerald-600" />
               <Stat label="Skipped" value={status.skipped} className="text-muted-foreground" />
               <Stat label="Failed" value={status.failed} className="text-red-600" />

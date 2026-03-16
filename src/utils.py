@@ -111,32 +111,29 @@ EXCLUDE_PATTERNS = {'.*', '__*', '*.tmp', '*.temp', '~*', '*.bak', '*.backup', '
 def is_supported_file(file_path: Path) -> bool:
     return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
 
-def discover_files(root_path: Path, recursive: bool = True, include_folders: list[str] | None = None) -> Iterator[Path]:
-    yielded: set[Path] = set()
+def _is_candidate(f: Path) -> bool:
+    return f.is_file() and is_supported_file(f) and not any(fnmatch.fnmatch(f.name, p) for p in EXCLUDE_PATTERNS)
 
-    def _process_file(f: Path) -> Iterator[Path]:
-        if f in yielded:
-            return
-        if f.is_file() and is_supported_file(f) and not any(fnmatch.fnmatch(f.name, p) for p in EXCLUDE_PATTERNS):
-            yielded.add(f)
-            yield f
+
+def discover_files(root_path: Path, recursive: bool = True, include_folders: list[str] | None = None) -> Iterator[Path]:
+    pattern = "**/*" if recursive else "*"
 
     if include_folders:
-        # Iterate over each include folder pattern and glob only within those folders
+        # Multiple folder patterns may overlap — deduplicate with a set
+        seen: set[Path] = set()
         for folder_pat in include_folders:
             for folder in root_path.glob(f"**/{folder_pat}"):
                 if not folder.is_dir():
                     continue
-                pattern = "**/*" if recursive else "*"
                 for f in folder.glob(pattern):
-                    for result in _process_file(f):
-                        yield result
+                    if _is_candidate(f) and f not in seen:
+                        seen.add(f)
+                        yield f
     else:
-        # No folder restriction – fall back to original behaviour
-        pattern = "**/*" if recursive else "*"
+        # Single pass — no overlaps possible, no dedup set needed
         for f in root_path.glob(pattern):
-            for result in _process_file(f):
-                yield result
+            if _is_candidate(f):
+                yield f
 
 def is_file_modified(file_path: Path, ingested_at_iso: str) -> bool:
     if ingested_at_iso == 'unknown':
