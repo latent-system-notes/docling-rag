@@ -78,7 +78,10 @@ def get_embedder():
 
 def cleanup_embedder() -> None:
     global _embedder_cache
+    if _embedder_cache is not None:
+        del _embedder_cache
     _embedder_cache = None
+    gc.collect()
     _free_cuda_cache()
 
 def _free_cuda_cache() -> None:
@@ -150,7 +153,12 @@ def managed_resources():
     try:
         yield
     finally:
-        cleanup_all_resources()
+        try:
+            cleanup_all_resources()
+        except Exception:
+            # Reset flag so future cleanup attempts are not skipped
+            _cleanup_done = False
+            raise
 
 _cleanup_done = False
 

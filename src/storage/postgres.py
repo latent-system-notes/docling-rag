@@ -887,16 +887,22 @@ def refresh_all_document_permissions() -> int:
     """Recompute document_permissions for all documents based on current path_permissions.
 
     First normalizes any inconsistent paths in path_permissions to absolute form,
-    then recomputes the document_permissions cache for every document.
+    then recomputes the document_permissions cache in batches to avoid loading
+    all documents into memory at once.
     """
     _normalize_stored_paths()
-    docs = list_documents()
     count = 0
-    for doc in docs:
-        doc_id = doc["doc_id"]
-        group_ids = compute_effective_groups(doc["file_path"])
-        set_document_permissions(doc_id, group_ids)
-        count += 1
+    batch_size = 500
+    offset = 0
+    while True:
+        docs = list_documents(limit=batch_size, offset=offset)
+        if not docs:
+            break
+        for doc in docs:
+            group_ids = compute_effective_groups(doc["file_path"])
+            set_document_permissions(doc["doc_id"], group_ids)
+            count += 1
+        offset += batch_size
     return count
 
 

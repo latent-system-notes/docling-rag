@@ -46,19 +46,21 @@ def _empty_job(started_by: str, folders: str | None, force: bool, workers: int, 
         "current_file": None,
         "logs": [],                   # list of {"ts": ..., "level": ..., "msg": ...}
         "logs_dropped": 0,           # count of log entries dropped due to cap
+        "log_lock": threading.Lock(), # protects logs list from concurrent access
         "cancel_flag": threading.Event(),
     }
 
 
 def _add_log(job: dict, level: str, msg: str):
-    if len(job["logs"]) >= MAX_JOB_LOGS:
-        job["logs_dropped"] += 1
-        return
-    job["logs"].append({
-        "ts": datetime.now().isoformat(timespec="seconds"),
-        "level": level,
-        "msg": msg,
-    })
+    with job["log_lock"]:
+        if len(job["logs"]) >= MAX_JOB_LOGS:
+            job["logs_dropped"] += 1
+            return
+        job["logs"].append({
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "level": level,
+            "msg": msg,
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +122,6 @@ def _run_ingestion(job: dict):
 
         _add_log(job, "INFO", f"Discovering and ingesting files from {doc_path} ...")
 
-        lock = threading.Lock()
-
         def _process_file(f: Path):
             if job["cancel_flag"].is_set():
                 return False, False, True  # treat as failed/cancelled
@@ -129,10 +129,11 @@ def _run_ingestion(job: dict):
             job["current_file"] = f.name
 
             if not job["force"]:
-                with lock:
-                    if document_exists(f):
-                        _add_log(job, "SKIP", f"[SKIPPED] {f.name} — already ingested")
-                        return False, True, False
+                # No lock needed — document_exists is a read-only DB call,
+                # concurrent reads are safe via the connection pool
+                if document_exists(f):
+                    _add_log(job, "SKIP", f"[SKIPPED] {f.name} — already ingested")
+                    return False, True, False
 
             try:
                 meta = ingest_document(f, ocr_mode=job["ocr_mode"])
@@ -247,10 +248,12 @@ async def start_ingestion(body: StartRequest, user: dict = Depends(require_admin
 
 @router.get("/status")
 async def get_status():
-    if not _current_job:
+    # Grab reference under lock to avoid TOCTOU race
+    with _job_lock:
+        job = _current_job
+    if not job:
         return {"active": False}
 
-    job = _current_job
     return {
         "active": job["status"] == "running",
         "id": job["id"],
@@ -273,21 +276,29 @@ async def get_status():
 
 @router.get("/logs")
 async def get_logs(offset: int = Query(0, ge=0)):
-    if not _current_job:
+    with _job_lock:
+        job = _current_job
+    if not job:
         return {"logs": [], "total": 0}
 
-    logs = _current_job["logs"]
+    with job["log_lock"]:
+        logs_snapshot = job["logs"][offset:]
+        total = len(job["logs"])
+        dropped = job.get("logs_dropped", 0)
+
     return {
-        "logs": logs[offset:],
-        "total": len(logs),
-        "dropped": _current_job.get("logs_dropped", 0),
+        "logs": logs_snapshot,
+        "total": total,
+        "dropped": dropped,
     }
 
 
 @router.post("/cancel")
 async def cancel_ingestion(user: dict = Depends(require_admin)):
-    if not _current_job or _current_job["status"] != "running":
+    with _job_lock:
+        job = _current_job
+    if not job or job["status"] != "running":
         raise HTTPException(status_code=400, detail="No running ingestion job to cancel")
 
-    _current_job["cancel_flag"].set()
+    job["cancel_flag"].set()
     return {"ok": True, "message": "Cancel signal sent"}
