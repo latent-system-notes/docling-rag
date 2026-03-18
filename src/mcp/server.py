@@ -79,7 +79,7 @@ def _resolve_user_from_headers() -> tuple[list[str] | None, str | None]:
                 display_name=username,
                 email=email,
                 is_admin=False,
-                auth_type="mcp",
+                auth_type="local",
                 must_change_password=False,
             )
 
